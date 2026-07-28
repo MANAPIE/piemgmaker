@@ -1,0 +1,35 @@
+{
+  "__meta__": {
+    "image_out": "12",
+    "save_node": "13",
+    "note": "object-inpaint-qwen-v1 — Qwen-Image GGUF 인페인팅. 선배치 캔버스 + 2단 마스크(SetLatentNoiseMask). __CANVAS__/__MASK_IMAGE__는 제출 시 엔진이 업로드 후 주입."
+  },
+  "1": { "class_type": "UnetLoaderGGUF", "inputs": { "unet_name": "__MODEL__" } },
+  "2": { "class_type": "CLIPLoader", "inputs": { "clip_name": "__CLIP__", "type": "qwen_image", "device": "default" } },
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "__VAE__" } },
+  "4": { "class_type": "ModelSamplingAuraFlow", "inputs": { "model": ["1", 0], "shift": 3.1 } },
+  "5": { "class_type": "CLIPTextEncode", "inputs": { "text": "__POSITIVE__", "clip": ["2", 0] } },
+  "6": { "class_type": "CLIPTextEncode", "inputs": { "text": "__NEGATIVE__", "clip": ["2", 0] } },
+  "7": { "class_type": "LoadImage", "inputs": { "image": "__CANVAS__" } },
+  "8": { "class_type": "LoadImage", "inputs": { "image": "__MASK_IMAGE__" } },
+  "9": { "class_type": "ImageToMask", "inputs": { "image": ["8", 0], "channel": "red" } },
+  "10": { "class_type": "VAEEncode", "inputs": { "pixels": ["7", 0], "vae": ["3", 0] } },
+  "11": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["4", 0],
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "latent_image": ["14", 0],
+      "seed": 0,
+      "steps": "__STEPS__",
+      "cfg": "__CFG__",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": "__DENOISE__"
+    }
+  },
+  "12": { "class_type": "VAEDecode", "inputs": { "samples": ["11", 0], "vae": ["3", 0] } },
+  "13": { "class_type": "SaveImage", "inputs": { "images": ["12", 0], "filename_prefix": "__PREFIX__" } },
+  "14": { "class_type": "SetLatentNoiseMask", "inputs": { "samples": ["10", 0], "mask": ["9", 0] } }
+}

@@ -1,0 +1,39 @@
+{
+  "__meta__": {
+    "image_out": "10",
+    "save_node": "11",
+    "styleref": { "encode_node": "6" },
+    "note": "object-gen-styleref-v1 — Qwen-Image-Edit-2511로 참조 이미지 스타일 반영 생성. 참조는 TextEncodeQwenImageEditPlus 컨디셔닝으로만 주입하고 latent는 빈 캔버스(구도 자유). 2번째 참조는 오케스트레이터가 동적 추가(__meta__.styleref 규약)."
+  },
+  "1": { "class_type": "UnetLoaderGGUF", "inputs": { "unet_name": "__MODEL__" } },
+  "2": { "class_type": "CLIPLoader", "inputs": { "clip_name": "__CLIP__", "type": "qwen_image", "device": "default" } },
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "__VAE__" } },
+  "4": { "class_type": "ModelSamplingAuraFlow", "inputs": { "model": ["1", 0], "shift": 3.1 } },
+  "5": { "class_type": "LoadImage", "inputs": { "image": "__REF1__" } },
+  "6": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": { "clip": ["2", 0], "prompt": "__POSITIVE__", "vae": ["3", 0], "image1": ["5", 0] }
+  },
+  "7": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": { "clip": ["2", 0], "prompt": "__NEGATIVE__", "vae": ["3", 0] }
+  },
+  "8": { "class_type": "EmptySD3LatentImage", "inputs": { "width": "__WIDTH__", "height": "__HEIGHT__", "batch_size": 1 } },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["4", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["8", 0],
+      "seed": 0,
+      "steps": "__STEPS__",
+      "cfg": "__CFG__",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "10": { "class_type": "VAEDecode", "inputs": { "samples": ["9", 0], "vae": ["3", 0] } },
+  "11": { "class_type": "SaveImage", "inputs": { "images": ["10", 0], "filename_prefix": "__PREFIX__" } }
+}

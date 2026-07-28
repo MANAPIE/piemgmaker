@@ -1,0 +1,20 @@
+# 사용자 교체 전제. 모델·샘플링은 프로파일이 결정.
+# translucent: 네이티브 알파 1순위 → trimap 폴백
+id: sp-glass
+name: 글래스
+version: 0.1.1
+prompt_template: "{subject}, clear see-through glass, strongly transparent material with visible refraction, light passing through the object, delicate inner glow and caustics, {mood}"
+negative: "opaque solid material, background scenery, photo backdrop, text, letters, watermark, frame, border, cropped edges"
+palette: []
+reference_set: []
+loras: []
+material_class: translucent
+shadow_policy: ambient
+workflow_template: object-gen-v1
+model_manifest:
+  model_id: profile-managed
+  files: []
+matting:
+  strategy: native_alpha
+  model: BiRefNet-matting
+  hash: null

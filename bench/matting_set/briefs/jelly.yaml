@@ -1,0 +1,10 @@
+campaign_text: 매팅 벤치 — 반투명 세트
+object_concept: glossy translucent jelly gummy bears
+style:
+  style_packs:
+  - sp-glass-qwen
+seed: 105
+candidate_count: 1
+size_preset:
+  width: 640
+  height: 640

@@ -1,0 +1,19 @@
+# 사용자 교체 전제. 모델·샘플링은 프로파일이 결정.
+id: sp-chrome
+name: 크롬 메탈
+version: 0.1.1
+prompt_template: "{subject}, liquid chrome metal, mirror-polished surface reflecting a bright soft studio, luminous silver reflections, sharp specular highlights, premium metallic feel, {mood}"
+negative: "matte surface, dark void reflections, black mirror areas, background scenery, photo backdrop, text, letters, watermark, frame, border, cropped edges"
+palette: []
+reference_set: []
+loras: []
+material_class: opaque
+shadow_policy: soft_floor
+workflow_template: object-gen-v1
+model_manifest:
+  model_id: profile-managed
+  files: []
+matting:
+  strategy: segment
+  model: BiRefNet-matting
+  hash: null

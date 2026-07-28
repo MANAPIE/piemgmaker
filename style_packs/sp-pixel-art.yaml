@@ -1,0 +1,19 @@
+# 사용자 교체 전제. 모델·샘플링은 프로파일이 결정.
+id: sp-pixel-art
+name: 픽셀 아트
+version: 0.1.0
+prompt_template: "{subject}, retro 8-bit pixel art, chunky pixels, limited vivid palette, clean sprite silhouette, {mood}"
+negative: "smooth gradients, photorealistic, 3d render, background scenery, text, letters, watermark, frame, border, cropped edges"
+palette: []
+reference_set: []
+loras: []
+material_class: opaque
+shadow_policy: none
+workflow_template: object-gen-v1
+model_manifest:
+  model_id: profile-managed
+  files: []
+matting:
+  strategy: segment
+  model: BiRefNet-matting
+  hash: null

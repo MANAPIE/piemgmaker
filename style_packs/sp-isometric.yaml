@@ -1,0 +1,19 @@
+# 사용자 교체 전제. 모델·샘플링은 프로파일이 결정.
+id: sp-isometric
+name: 아이소메트릭
+version: 0.1.0
+prompt_template: "{subject}, isometric miniature 3D diorama, 45-degree view, cute compact proportions, clean detailed surfaces, {mood}"
+negative: "background scenery, photo backdrop, flat front view, text, letters, watermark, frame, border, cropped edges"
+palette: []
+reference_set: []
+loras: []
+material_class: opaque
+shadow_policy: soft_floor
+workflow_template: object-gen-v1
+model_manifest:
+  model_id: profile-managed
+  files: []
+matting:
+  strategy: segment
+  model: BiRefNet-matting
+  hash: null

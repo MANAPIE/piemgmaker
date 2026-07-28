@@ -1,0 +1,48 @@
+# 모델 프로파일 — 생성 모델 계열 선택지.
+# 각 파일은 sha256로 핀한다.
+
+default: qwen-image
+
+profiles:
+  - id: qwen-image
+    label: "Qwen-Image (20B Q8)"
+    workflow_gen: object-gen-qwen-v1
+    workflow_inpaint: object-inpaint-qwen-v1
+    workflow_styleref: object-gen-styleref-v1
+    supports_negative: true
+    sampling: { steps: 20, cfg: 2.5 }
+    manifest:
+      model_id: qwen-image-20b-q8-gguf
+      files:
+        - { name: Qwen_Image-Q8_0.gguf, kind: unet, sha256: 43142b32778dc0568c27395abc6f8291ac53f1de0b98eed919712cf161f248de }
+        - { name: qwen_2.5_vl_7b_fp8_scaled.safetensors, kind: clip, sha256: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4 }
+        - { name: qwen_image_vae.safetensors, kind: vae, sha256: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f }
+    styleref_manifest:
+      model_id: qwen-image-edit-2511-q8-gguf
+      files:
+        - { name: qwen-image-edit-2511-Q8_0.gguf, kind: unet, sha256: ab4f0622fb002fccaaa679a2ecce6fd1b3190d8ea28a5b7b2b17b8669bc24afa }
+        - { name: qwen_2.5_vl_7b_fp8_scaled.safetensors, kind: clip, sha256: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4 }
+        - { name: qwen_image_vae.safetensors, kind: vae, sha256: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f }
+    native_alpha:
+      workflow: object-gen-native-alpha-v1
+      sampling: { steps: 20, cfg: 2.5 }
+      manifest:
+        model_id: qwen-image-layered-q8-gguf
+        files:
+          - { name: qwen-image-layered-Q8_0.gguf, kind: unet, sha256: 0d9f3cc357f8ecaf9547908fc24ac9cf05d14f659115ac0aa24c7fb5e86aa92c }
+          - { name: qwen_2.5_vl_7b_fp8_scaled.safetensors, kind: clip, sha256: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4 }
+          - { name: qwen_image_layered_vae.safetensors, kind: vae, sha256: c5320595fc61859ccdd0282184208f7b781c983b8ce4c6bc3e7723a807d3d28d }
+
+  - id: flux2-dev
+    label: "FLUX.2 dev (Q8)"
+    workflow_gen: object-gen-flux2-v1
+    workflow_inpaint: object-inpaint-flux2-v1
+    workflow_styleref: null      # v1 미지원 — 참조 이미지는 qwen-image 프로파일 사용
+    supports_negative: false     # guidance 증류 모델 — 네거티브 미사용
+    sampling: { steps: 20, cfg: 4.0 }
+    manifest:
+      model_id: flux2-dev-q8-gguf
+      files:
+        - { name: flux2-dev-Q8_0.gguf, kind: unet, sha256: 09d005300dd8dcbbd489bb75ada6254145c84c2c9c3d7cc1829e3c5dedcb42ce }
+        - { name: mistral_3_small_flux2_fp8.safetensors, kind: clip, sha256: e3467b7d912a234fb929cdf215dc08efdb011810b44bc21081c4234cc75b370e }  # fp8 텍스트 인코더 — bf16 대비 메모리 사용량 감소
+        - { name: flux2-vae.safetensors, kind: vae, sha256: d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5 }

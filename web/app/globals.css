@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/* 컷팅 매트 스튜디오 — paper/ink 중립 + 매트 그린 + 알파 체커보드 시그니처 */
+:root {
+  --paper: #f4f5f2;
+  --card: #ffffff;
+  --ink: #1a1d1a;
+  --ink-soft: #626a62;
+  --line: #dcdfd9;
+  --mat: #2f5d50;
+  --mat-deep: #22453b;
+  --mat-tint: #e4ede8;
+  --warn: #9a6b1f;
+  --warn-tint: #f5ecd9;
+  --fail: #b3372e;
+  --fail-tint: #f7e4e2;
+  --checker-a: #e9e9e4;
+  --checker-b: #ffffff;
+}
+
+@theme inline {
+  --font-sans: var(--font-plex-kr), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-feature-settings: "ss01";
+}
+
+/* 알파 채널의 상징 — 검수면과 로고 스와치가 공유하는 텍스처 */
+.checker {
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 50% / 20px 20px;
+}
+.checker-fine {
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 50% / 10px 10px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--mat);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--mat-tint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

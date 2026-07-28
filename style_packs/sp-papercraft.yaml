@@ -1,0 +1,19 @@
+# 사용자 교체 전제. 모델·샘플링은 프로파일이 결정.
+id: sp-papercraft
+name: 페이퍼 크래프트
+version: 0.1.0
+prompt_template: "{subject}, layered paper craft style, cut paper edges, subtle paper texture, gentle layered depth, pastel tones, {mood}"
+negative: "photorealistic, glossy plastic, background scenery, text, letters, watermark, frame, border, cropped edges"
+palette: []
+reference_set: []
+loras: []
+material_class: opaque
+shadow_policy: soft_floor
+workflow_template: object-gen-v1
+model_manifest:
+  model_id: profile-managed
+  files: []
+matting:
+  strategy: segment
+  model: BiRefNet-matting
+  hash: null

@@ -1,0 +1,32 @@
+{
+  "__meta__": {
+    "image_out": "10",
+    "save_node": "11",
+    "note": "object-inpaint-v1 — 자산 선배치 + 2단 마스크 인페인팅 경로. __CANVAS__/__MASK_IMAGE__는 제출 시 엔진이 업로드 후 주입(payload.input_images). 마스크 흰색=재페인트 허용, 코어=0."
+  },
+  "1": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "__MODEL__" } },
+  "2": { "class_type": "CLIPTextEncode", "inputs": { "text": "__POSITIVE__", "clip": ["1", 1] } },
+  "3": { "class_type": "CLIPTextEncode", "inputs": { "text": "__NEGATIVE__", "clip": ["1", 1] } },
+  "4": { "class_type": "LoadImage", "inputs": { "image": "__CANVAS__" } },
+  "5": { "class_type": "LoadImage", "inputs": { "image": "__MASK_IMAGE__" } },
+  "6": { "class_type": "ImageToMask", "inputs": { "image": ["5", 0], "channel": "red" } },
+  "7": { "class_type": "VAEEncode", "inputs": { "pixels": ["4", 0], "vae": ["1", 2] } },
+  "8": { "class_type": "SetLatentNoiseMask", "inputs": { "samples": ["7", 0], "mask": ["6", 0] } },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["8", 0],
+      "seed": 0,
+      "steps": "__STEPS__",
+      "cfg": "__CFG__",
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": "__DENOISE__"
+    }
+  },
+  "10": { "class_type": "VAEDecode", "inputs": { "samples": ["9", 0], "vae": ["1", 2] } },
+  "11": { "class_type": "SaveImage", "inputs": { "images": ["10", 0], "filename_prefix": "__PREFIX__" } }
+}

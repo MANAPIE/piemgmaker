@@ -1,0 +1,32 @@
+{
+  "__meta__": {
+    "image_out": "10",
+    "save_node": "11",
+    "note": "object-gen-native-alpha-v1 — Qwen-Image-Layered 네이티브 알파 (translucent 1순위). RGBA-VAE로 알파를 생성 시점에 산출. 공식 템플릿 구성: EmptyQwenImageLayeredLatentImage + LatentCutToBatch(dim=t) + shift 1."
+  },
+  "1": { "class_type": "UnetLoaderGGUF", "inputs": { "unet_name": "__MODEL__" } },
+  "2": { "class_type": "CLIPLoader", "inputs": { "clip_name": "__CLIP__", "type": "qwen_image", "device": "default" } },
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "__VAE__" } },
+  "4": { "class_type": "ModelSamplingAuraFlow", "inputs": { "model": ["1", 0], "shift": 1.0 } },
+  "5": { "class_type": "CLIPTextEncode", "inputs": { "text": "__POSITIVE__", "clip": ["2", 0] } },
+  "6": { "class_type": "CLIPTextEncode", "inputs": { "text": "__NEGATIVE__", "clip": ["2", 0] } },
+  "7": { "class_type": "EmptyQwenImageLayeredLatentImage", "inputs": { "width": "__WIDTH__", "height": "__HEIGHT__", "layers": 2, "batch_size": 1 } },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["4", 0],
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "latent_image": ["7", 0],
+      "seed": 0,
+      "steps": "__STEPS__",
+      "cfg": "__CFG__",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "9": { "class_type": "LatentCutToBatch", "inputs": { "samples": ["8", 0], "dim": "t", "slice_size": 1 } },
+  "10": { "class_type": "VAEDecode", "inputs": { "samples": ["9", 0], "vae": ["3", 0] } },
+  "11": { "class_type": "SaveImage", "inputs": { "images": ["10", 0], "filename_prefix": "__PREFIX__" } }
+}

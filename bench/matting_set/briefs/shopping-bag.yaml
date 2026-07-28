@@ -1,0 +1,10 @@
+campaign_text: 매팅 벤치 — 불투명 세트
+object_concept: a glossy 3D shopping bag with a floating percent sign
+style:
+  style_packs:
+  - sp-3d-glossy-qwen
+seed: 101
+candidate_count: 1
+size_preset:
+  width: 640
+  height: 640

@@ -1,0 +1,19 @@
+# 사용자 교체 전제. 모델·샘플링은 프로파일이 결정.
+id: sp-neon-glow
+name: 네온 글로우
+version: 0.1.2
+prompt_template: "{subject}, glowing neon tube sculpture, luminous bent glass tubes evenly lit from end to end, electric vibrant glow, floating in empty space with no backdrop panel, crisp silhouette, {mood}"
+negative: "dark tube ends, unlit electrode caps, app icon plate, rounded square backdrop, dark panel behind object, background scenery, photo backdrop, text, letters, watermark, frame, border, cropped edges, dull flat colors"
+palette: []
+reference_set: []
+loras: []
+material_class: opaque
+shadow_policy: none
+workflow_template: object-gen-v1
+model_manifest:
+  model_id: profile-managed
+  files: []
+matting:
+  strategy: segment
+  model: BiRefNet-matting
+  hash: null

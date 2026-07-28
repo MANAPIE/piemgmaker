@@ -1,0 +1,10 @@
+campaign_text: 매팅 벤치 — 불투명 세트
+object_concept: a cluster of cute potted plants with rounded leaves
+style:
+  style_packs:
+  - sp-3d-clay-qwen
+seed: 102
+candidate_count: 1
+size_preset:
+  width: 640
+  height: 640

@@ -1,0 +1,10 @@
+campaign_text: 매팅 벤치 — 반투명 세트
+object_concept: a transparent glass cup with ice cubes and sparkling water
+style:
+  style_packs:
+  - sp-glass-qwen
+seed: 103
+candidate_count: 1
+size_preset:
+  width: 640
+  height: 640

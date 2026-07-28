@@ -1,0 +1,14 @@
+# 자산 라이브러리 v1 — 웹 등록분 포함. 삭제 대신 archived(soft delete).
+assets:
+- id: example-badge
+  name: 예시 배지
+  type: object
+  variants:
+  - id: main
+    file: example-badge/main.png
+    tags: []
+    archived: false
+  usage:
+    min_scale: 0.5
+    clear_space_px: 16
+  archived: false

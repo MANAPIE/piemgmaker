@@ -1,0 +1,16 @@
+items:
+- id: shopping-bag
+  rgb: images/shopping-bag.png
+  material: opaque
+- id: potted-plant
+  rgb: images/potted-plant.png
+  material: opaque
+- id: glass-cup
+  rgb: images/glass-cup.png
+  material: translucent
+- id: ribbon
+  rgb: images/ribbon.png
+  material: translucent
+- id: jelly
+  rgb: images/jelly.png
+  material: translucent

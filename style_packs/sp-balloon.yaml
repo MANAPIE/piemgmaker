@@ -1,0 +1,19 @@
+# 사용자 교체 전제. 모델·샘플링은 프로파일이 결정.
+id: sp-balloon
+name: 벌룬 3D
+version: 0.1.0
+prompt_template: "{subject}, inflatable glossy balloon 3d style, puffy rounded volume, soft plastic sheen, playful festive feel, {mood}"
+negative: "deflated, matte, background scenery, photo backdrop, text, letters, watermark, frame, border, cropped edges"
+palette: []
+reference_set: []
+loras: []
+material_class: opaque
+shadow_policy: soft_floor
+workflow_template: object-gen-v1
+model_manifest:
+  model_id: profile-managed
+  files: []
+matting:
+  strategy: segment
+  model: BiRefNet-matting
+  hash: null

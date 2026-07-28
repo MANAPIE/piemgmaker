@@ -1,0 +1,43 @@
+{
+  "__meta__": {
+    "input_nodes": [
+      { "node": "F1", "socket": "image" },
+      { "node": "F4", "socket": "image" }
+    ],
+    "output_node": "F6",
+    "output_socket": 0,
+    "note": "trimap 매팅 트랙(c) — BiRefNet 코스 마스크 → CreateTrimap → ViTMatte(ApplyMatting) → RGBA 합성."
+  },
+  "F1": {
+    "class_type": "BiRefNetRMBG",
+    "inputs": {
+      "model": "__TRIMAP_COARSE_MODEL__",
+      "background": "Alpha",
+      "refine_foreground": false,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false
+    }
+  },
+  "F2": {
+    "class_type": "CreateTrimap",
+    "inputs": { "mask": ["F1", 1], "kernel_size": "__TRIMAP_KERNEL__" }
+  },
+  "F3": {
+    "class_type": "MattingModelLoader",
+    "inputs": { "model_name": "__TRIMAP_MODEL__" }
+  },
+  "F4": {
+    "class_type": "ApplyMatting",
+    "inputs": {
+      "matting_model": ["F3", 0],
+      "matting_preprocessor": ["F3", 1],
+      "trimap": ["F2", 0]
+    }
+  },
+  "F5": { "class_type": "InvertMask", "inputs": { "mask": ["F4", 1] } },
+  "F6": {
+    "class_type": "JoinImageWithAlpha",
+    "inputs": { "image": ["F4", 0], "alpha": ["F5", 0] }
+  }
+}
