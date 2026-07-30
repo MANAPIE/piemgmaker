@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
-from piemgmaker.schemas.style_pack import ModelManifest, SamplingSpec
+from piemgmaker.schemas.style_pack import ModelFile, ModelManifest, SamplingSpec
 
 
 class NativeAlphaSpec(BaseModel):
@@ -19,6 +19,54 @@ class NativeAlphaSpec(BaseModel):
     workflow: str
     manifest: ModelManifest
     sampling: SamplingSpec | None = None
+
+
+class RemoteFileOverride(BaseModel):
+    """원격 백엔드 전용 모델 파일 치환 — 로컬 파일명(replaces)을 원격 파일명(name)으로 바꾼다.
+
+    원격 GPU 메모리에 맞춘 양자화 변형(Q6_K 등)을 쓰기 위한 것이며,
+    sha256은 파일을 받아 핀하기 전까지 비워 둘 수 있다.
+    """
+
+    replaces: str
+    name: str
+    sha256: str | None = None
+
+
+class RemoteSpec(BaseModel):
+    """프로파일의 원격 백엔드 지원 선언 — 이 블록이 없으면 원격 실행 대상이 아니다."""
+
+    backend_group: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    files: list[RemoteFileOverride] = Field(default_factory=list)
+    supports_styleref: bool = False
+    supports_native_alpha: bool = False
+
+    @model_validator(mode="after")
+    def _check_files(self) -> "RemoteSpec":
+        targets = [f.replaces for f in self.files]
+        if len(targets) != len(set(targets)):
+            raise ValueError(f"remote.files의 치환 대상 중복: {targets}")
+        return self
+
+    def apply(self, manifest: ModelManifest) -> ModelManifest:
+        """로컬 매니페스트에 원격 파일 치환을 적용한 사본을 만든다."""
+        if not self.files:
+            return manifest
+        overrides = {f.replaces: f for f in self.files}
+        unknown = sorted(set(overrides) - {f.name for f in manifest.files})
+        if unknown:
+            raise ValueError(
+                f"원격 파일 치환 대상이 매니페스트 {manifest.model_id!r}에 없습니다: {unknown}"
+            )
+        files = []
+        for file in manifest.files:
+            override = overrides.get(file.name)
+            files.append(
+                ModelFile(name=override.name, kind=file.kind, sha256=override.sha256)
+                if override
+                else file
+            )
+        return manifest.model_copy(update={"files": files})
 
 
 class ModelProfile(BaseModel):
@@ -32,6 +80,7 @@ class ModelProfile(BaseModel):
     manifest: ModelManifest
     styleref_manifest: ModelManifest | None = None  # 참조 이미지 경로가 다른 모델을 쓰는 경우(Edit 계열)
     native_alpha: NativeAlphaSpec | None = None
+    remote: RemoteSpec | None = None  # 원격 백엔드 지원 선언 (없으면 로컬 전용 프로파일)
 
 
 class ModelProfileRegistry(BaseModel):

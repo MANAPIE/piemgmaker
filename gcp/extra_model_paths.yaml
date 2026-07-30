@@ -1,0 +1,20 @@
+# ComfyUI 모델 경로 → Cloud Run GCS FUSE 마운트(/models, 읽기 전용).
+# 버킷 ${project_id}-models 안의 서브디렉토리 이름은 ComfyUI 표준을 그대로 쓴다.
+# 업로드 대상 파일 목록은 sync_models.sh가 단일 소스다.
+#
+# 키 이름 주의: ComfyUI 최신 버전은 unet → diffusion_models, clip → text_encoders로
+# 내부 매핑한다(folder_paths.map_legacy). 여기서는 매핑 후 이름을 쓰고,
+# 실제 디렉토리는 계약대로 unet/·clip/·vae/를 가리킨다.
+# ComfyUI-GGUF의 UnetLoaderGGUF는 diffusion_models 경로를 unet_gguf로 재등록하므로
+# .gguf 파일도 같은 디렉토리에서 발견된다.
+#
+# 매팅 가중치(BiRefNet-*, vitmatte_small)는 여기에 없다 — 컨테이너 이미지에 사전 포함된다.
+# /models는 읽기 전용이라 노드의 자동 다운로드 목적지로 쓸 수 없기 때문이다.
+
+piemgmaker_gcs:
+    base_path: /models
+    is_default: false
+
+    diffusion_models: unet
+    text_encoders: clip
+    vae: vae

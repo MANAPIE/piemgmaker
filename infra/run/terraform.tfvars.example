@@ -1,0 +1,16 @@
+# run root는 기본값만으로 동작한다 — 이 파일은 기본을 바꿀 때만 terraform.tfvars로 복사한다.
+# terraform.tfvars는 커밋하지 않는다.
+#
+# project_id는 적지 않는 것이 기본이다: Makefile이 격리 gcloud 구성의 기본 프로젝트를
+# TF_VAR_project_id로 주입한다. 다른 프로젝트를 강제할 때만 아래를 켠다.
+# project_id = "<gcp-project-id>"
+
+# region = "asia-southeast1"
+
+# 최초 생성용 이미지. 비우면 gcp/deploy.sh --initial이 올린 bootstrap 태그를 쓴다.
+# 실제 이미지 롤아웃은 gcp/deploy.sh가 하고 TF는 ignore_changes로 무시한다.
+# qwen_image  = "asia-southeast1-docker.pkg.dev/<gcp-project-id>/pm-comfy/pm-comfy:<태그>"
+# flux2_image = "asia-southeast1-docker.pkg.dev/<gcp-project-id>/pm-comfy/pm-comfy:<태그>"
+
+# 자기 종료 와치독 유휴 임계(초). 0이면 비활성 — 유휴 꼬리 과금이 그대로 붙는다.
+# idle_exit_seconds = 90

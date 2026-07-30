@@ -41,10 +41,19 @@ web/                     # Next.js (App Router, TypeScript)
 환경 설정은 기본적으로 3키로만 분기한다. 예외는 선택적 온디맨드 기동 레이어로, `PM_COMFY_ONDEMAND_DIR`와 기동 스크립트(`comfy_up.sh`) 존재 여부를 추가로 감지한다.
 
 - `PM_BACKEND_URL` — 기동 중인 ComfyUI 서버 주소 (기본 `http://127.0.0.1:8188`)
-- `PM_BACKEND_AUTH` — 백엔드 인증 토큰 (기본 빈 값; 원격 ComfyUI가 인증을 요구할 때만 설정)
+- `PM_BACKEND_AUTH` — 백엔드 인증 토큰 (기본 빈 값; 원격 백엔드의 Bearer 토큰으로도 재사용)
 - `PM_STORAGE` — 산출물 루트 디렉토리 (기본 `./out`)
 
+원격 백엔드(GCP Cloud Run) 사용 시 3키 원칙의 확장으로 다음이 추가된다.
+
+- `PM_ENGINE` — `local-comfy`(기본) | `remote-comfy`. 미설정 시 동작은 기존과 완전히 같다
+- `PM_REMOTE_URL_QWEN` / `PM_REMOTE_URL_FLUX2` — 모델 계열별 원격 서비스 URL. `remote-comfy`면 최소 1개 필수, **https만 허용**(Bearer 토큰 평문 전송 차단)
+
 설정 예시는 [.env.example](../.env.example) 참조.
+
+리포 루트의 `.env`는 CLI 진입점(`cli.main`)이 `python-dotenv`로 자동 로드한다. **이미 설정된 실제 환경변수가 `.env`보다 우선한다**(`override=False`) — 일회성 우회는 `PM_ENGINE=local-comfy piemgmaker serve`처럼 앞에 붙인다. 로드는 진입점에만 있고 `load_config()`는 순수 로더로 남는다(테스트가 리포의 실제 `.env`를 흡수하지 않게 하기 위함). `uvicorn`으로 서버 모듈을 직접 띄우면 CLI를 거치지 않아 `.env`가 적용되지 않는다.
+
+`run`·`serve`는 시작 시 어느 백엔드로 실행되는지 stderr에 한 줄 남기고, 원격 URL이 설정됐는데 `PM_ENGINE`이 `local-comfy`면 경고한다 — 설정 불일치로 생성이 조용히 로컬로 나가는 것을 막는다.
 
 ## 4. 엔진 계약
 
@@ -56,11 +65,28 @@ class WorkflowEngine(Protocol):
     def submit(self, payload: JobPayload) -> JobHandle: ...
     def poll(self, handle: JobHandle) -> JobStatus: ...   # QUEUED | PREPARING | RUNNING(n/k) | DONE | FAILED
     def fetch(self, handle: JobHandle, dest_dir: Path) -> list[CandidateResult]: ...
+    def cancel(self, handle: JobHandle) -> None: ...
 ```
 
-- `JobPayload`는 렌더 완료된 워크플로우 그래프와 버전 핀(워크플로우 id·해시, model_manifest, 스타일 팩 id·version, 매팅 전략·모델 해시, 시드, 사이즈)을 담는다. 히스토리의 "이 설정으로 다시 생성"이 이 페이로드를 그대로 재사용한다.
+- `JobPayload`는 렌더 완료된 워크플로우 그래프와 버전 핀(워크플로우 id·해시, model_manifest, 스타일 팩 id·version, 매팅 전략·모델 해시, 시드, 사이즈)을 담는다. 히스토리의 "이 설정으로 다시 생성"이 이 페이로드를 그대로 재사용한다. 원격 잡은 `backend_group`(qwen|flux2)으로 라우팅 대상을 기록한다.
 - `JobPayload.output_index`는 다중 출력 워크플로우에서 채택할 레이어를 지정한다(`-1`은 마지막 레이어).
-- 구현체: `LocalComfy`는 ComfyUI의 `/prompt`·`/history` API로 submit/poll/fetch하고 타임아웃 시 FAILED로 처리한다. `RemoteComfy`는 스텁이다. `HostedAPI`는 스텁이며, protected_asset을 포함한 페이로드를 거부하는 가드를 코드로 명시한다.
+- 구현체: HTTP 코어(submit/poll/fetch/cancel/업로드)는 `ComfyHTTPEngine` 베이스가 담당한다. `LocalComfy`는 여기에 온디맨드 subprocess 기동·하트비트만 얹는다. `RemoteComfy`는 `backend_group`별 URL로 라우팅하고 콜드 스타트(`/system_stats` 폴링, 기본 600초)를 기다린다 — 유휴 종료는 컨테이너 쪽 와치독 소관이라 클라이언트에는 없다. `HostedAPI`는 스텁이며, protected_asset을 포함한 페이로드를 거부하는 가드를 코드로 명시한다(자기 소유 GCP는 신뢰 경계 안이라 `RemoteComfy`에는 이 가드가 없다).
+- poll은 연속 전송 실패 5회에 백엔드 생존을 재확인하고 죽었으면 `EngineError`로 승격한다 — 단일 워커 큐가 죽은 백엔드에 타임아웃(기본 4시간)까지 묶이는 것을 막는다.
+- 서버의 엔진 상태 프로브는 `queue_snapshot()`(기동 없음·인증 포함) 경유이며, 원격 엔진은 **진행 중 잡이 없으면 네트워크를 건드리지 않는다** — 웹의 3·5초 폴링이 유휴 Cloud Run 인스턴스를 깨워 과금을 유발하지 않게 하기 위함이다. 진행 중일 때도 해당 잡의 `backend_group`만 프로브한다.
+
+### 원격 백엔드 구성 (GCP Cloud Run GPU)
+
+구축·배포 절차는 [gcp/README.md](../gcp/README.md), Terraform은 [infra/README.md](../infra/README.md).
+
+- 리전 `asia-southeast1`. 모델 계열별 서비스 2개: `pm-comfy-qwen`(L4 24GB / 8 vCPU / 32GiB), `pm-comfy-flux2`(RTX PRO 6000 Blackwell 96GB / 20 vCPU / 80GiB). 둘 다 scale-to-zero · `max-instances=1` · 세션 어피니티 · GPU 존 이중화 off.
+- 모델은 단일 리전 버킷을 GCS FUSE로 `/models`에 읽기 전용 마운트한다. 버킷에 Rapid Cache 3존(asia-southeast1-a/b/c, TTL 24h)이 붙어 있다.
+- **Direct VPC egress(`ALL_TRAFFIC`) + 서브넷 Private Google Access는 필수다.** 빼면 인스턴스 대역폭이 600 Mbps로 묶여 모델 적재가 느려진다.
+- 컨테이너는 nginx Bearer 프록시(`$PORT` → `127.0.0.1:8188`)와 ComfyUI, 자기 종료 와치독으로 구성된다. 와치독 유휴 임계는 540초 — 유휴와 적재가 같은 인스턴스 요율로 과금되므로 손익 분기점이 적재 소요 시간과 같고, Cloud Run이 GPU 인스턴스를 유휴 10분에 회수하므로 9분이 실질 상한이다. Cloud Run에는 유휴 시간을 조절하는 설정이 없어 이 와치독이 유일한 손잡이다.
+- **ComfyUI는 `--disable-dynamic-vram`으로 띄운다.** 기본값인 지연 적재는 가중치 조각마다 GCS 왕복을 만들어 네트워크 파일시스템에서 치명적이다. **`--disable-mmap`은 넣지 않는다 — 같은 마운트에서 TE 읽기가 8배 느려진다.**
+- 성능·비용 현황(qwen / L4 실측): 컨테이너 기동 31초, 모델 적재 약 6분 20초, 잡 1건 8~9분, 잡당 약 $0.24. 와치독 창 안의 두 번째 잡은 적재를 건너뛴다. 시간당 단가는 qwen $1.71 / flux2 $3.82이고, 상시 비용은 버킷·이미지·캐시로 월 $10 안팎이다.
+- ComfyUI나 커스텀 노드 버전을 올린 뒤에는 잡 1건의 구간별 소요를 다시 측정한다 — 적재 관련 기본값이 바뀌면 이 구간이 조용히 되돌아간다.
+- **원격은 생성·인페인팅만 지원한다.** 스타일 참조(Edit 계열)와 네이티브 알파(Layered 계열)는 프로파일의 `remote.supports_*`가 허용해야 쓸 수 있고, 현재는 해당 모델 파일을 버킷에 올리지 않아 둘 다 `false`다. 원격에서 translucent 팩은 trimap으로 강등된다(잡은 성공하고 알파 정확도만 떨어진다).
+- 능력 판정은 `pipeline/capabilities.py`의 `model_capability()` 하나가 소유하고, `build_job`의 실패 판정과 `/api/models` 응답이 이를 공유한다 — 각자 판정하면 "UI는 쓸 수 있다고 표시하는데 제출하면 실패"가 된다. 따라서 `/api/models`의 `supports_*`는 프로파일 원본이 아니라 **현재 엔진에서의 유효값**이다.
 
 ## 5. 파이프라인 & 데이터 흐름
 

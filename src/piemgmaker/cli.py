@@ -7,12 +7,13 @@ import uuid
 from pathlib import Path
 
 import yaml
+from dotenv import find_dotenv, load_dotenv
 
 from piemgmaker import __version__
 from piemgmaker.assets_lib.library import AssetLibrary
 from piemgmaker.bench import load_bench_set, validate_set
-from piemgmaker.config import load_config
-from piemgmaker.engine.local_comfy import LocalComfyEngine
+from piemgmaker.config import Config, load_config
+from piemgmaker.engine import create_engine
 from piemgmaker.golden.runner import run_cases
 from piemgmaker.pipeline.orchestrate import build_job, execute_job
 from piemgmaker.schemas.brief import BriefInput
@@ -24,12 +25,44 @@ from piemgmaker.workflows.render import load_template
 WORKFLOW_IDS = ("object-gen-v1", "object-inpaint-v1")
 
 
+def _load_env() -> None:
+    """CWD에서 위로 올라가며 .env를 찾아 환경에 주입한다.
+
+    override=False — 실제 환경변수가 .env를 이긴다(일회성 우회를 앞에 붙여 쓸 수 있게).
+    로드는 이 진입점에만 둔다 — load_config()에서 읽으면 테스트가 리포의 실제 .env를 흡수한다.
+    """
+    path = find_dotenv(usecwd=True)
+    if path:
+        load_dotenv(path, override=False)
+
+
+def _print_engine(config: Config) -> None:
+    """어느 백엔드로 실행되는지 stderr에 남긴다 — 토큰은 출력하지 않는다.
+
+    stdout은 run 서브커맨드의 JSON 계약이라 쓰지 않는다. 설정이 어긋난 채로 생성이 조용히
+    로컬 ComfyUI로 나가는 것을 막는 것이 목적이다.
+    """
+    if config.engine_flavor == "remote":
+        targets = "  ".join(f"{group}={url}" for group, url in sorted(config.remote_urls.items()))
+        print(f"engine={config.engine}  {targets}", file=sys.stderr)
+        return
+    print(f"engine={config.engine}  backend={config.backend_url}", file=sys.stderr)
+    if config.remote_urls:
+        groups = ", ".join(sorted(config.remote_urls))
+        print(
+            f"경고: 원격 URL이 설정돼 있지만({groups}) PM_ENGINE={config.engine}입니다 "
+            "— 로컬 백엔드로 실행됩니다.",
+            file=sys.stderr,
+        )
+
+
 def _load_profiles(path: Path) -> ModelProfileRegistry | None:
     return load_model_profiles(path) if path.is_file() else None
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     config = load_config()
+    _print_engine(config)
     packs = load_style_packs(args.packs_dir)
     brief = BriefInput.model_validate(yaml.safe_load(args.brief.read_text(encoding="utf-8")))
     library = AssetLibrary(args.assets_dir) if brief.assets else None
@@ -42,8 +75,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         job_id=job_id,
         workdir=config.storage / "jobs" / job_id / "inputs",
         skip_matting=args.skip_matting,
+        engine_flavor=config.engine_flavor,
     )
-    engine = LocalComfyEngine(config)
+    engine = create_engine(config)
     result = execute_job(build, engine, config, timeout_s=args.timeout)
     print(
         json.dumps(
@@ -75,7 +109,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
     workflows = [load_template(workflow_id)[1] for workflow_id in WORKFLOW_IDS]
     report = build_manifest(
         config,
-        engine_name=LocalComfyEngine.name,
+        engine_name=config.engine,
         package_version=__version__,
         workflows=workflows,
         style_packs=packs,
@@ -124,11 +158,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from piemgmaker.server.jobs import JobStore
 
     config = load_config()
+    _print_engine(config)
     packs = load_style_packs(args.packs_dir)
     store = JobStore(
         config,
         packs,
         args.assets_dir,
+        engine_factory=lambda: create_engine(config),
         timeout_s=args.timeout,
         profiles=_load_profiles(args.profiles),
     )
@@ -139,6 +175,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_env()
     parser = argparse.ArgumentParser(prog="piemgmaker", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 

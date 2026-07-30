@@ -44,9 +44,16 @@ uv run piemgmaker bench --set bench/matting_set/set.yaml --dry-run    # 배경 �
 
 웹 3키 — `GATE_PASSWORD`, `PM_API_URL`, `NEXT_PUBLIC_BRAND_COLOR`.
 
+원격 백엔드(GCP Cloud Run) 사용 시 추가 키:
+
+- `PM_ENGINE` — `local-comfy`(기본) | `remote-comfy`
+- `PM_REMOTE_URL_QWEN` / `PM_REMOTE_URL_FLUX2` — 모델 계열별 원격 서비스 URL (https 필수, `PM_BACKEND_AUTH`가 Bearer 토큰)
+
 예시는 [.env.example](.env.example) · [web/.env.example](web/.env.example) 참조.
 
-엔진은 기본적으로 `PM_BACKEND_URL`의 기동 중인 ComfyUI에 접속한다. 온디맨드 기동 레이어(`comfy_up.sh`)가 감지되면 선택적으로 사용하며, 위치는 `PM_COMFY_ONDEMAND_DIR`로 지정한다.
+리포 루트의 `.env`는 CLI가 자동으로 읽는다. **이미 설정된 실제 환경변수가 `.env`보다 우선**하므로 일회성 우회는 앞에 붙여 쓴다 (`PM_ENGINE=local-comfy uv run piemgmaker serve`). `uvicorn`으로 서버 모듈을 직접 띄우면 `.env`가 적용되지 않으니 `piemgmaker serve`를 쓴다. `run`·`serve`는 시작 시 사용 중인 백엔드를 stderr에 한 줄 출력한다.
+
+엔진은 기본적으로 `PM_BACKEND_URL`의 기동 중인 ComfyUI에 접속한다. 온디맨드 기동 레이어(`comfy_up.sh`)가 감지되면 선택적으로 사용하며, 위치는 `PM_COMFY_ONDEMAND_DIR`로 지정한다. `PM_ENGINE=remote-comfy`면 GCP Cloud Run의 원격 ComfyUI로 라우팅한다 — 구축·운영은 [gcp/README.md](gcp/README.md) 참조.
 
 ## 웹 인터페이스
 
@@ -61,7 +68,7 @@ cd web && npm run build && npm start           # ② 프론트 (Next.js) → htt
 ## 모델 선택 · 스타일 참조
 
 - **모델**: 생성 화면에서 `qwen-image`(기본)와 `flux2-dev`를 선택한다. 정의는 [model_profiles.yaml](model_profiles.yaml)이 단일 소스(워크플로우·샘플링·sha256 핀)이며, 스타일 팩은 스타일만 소유한다.
-- **스타일 참조 이미지**: 최대 2장. Qwen-Image-Edit-2511이 무드·질감을 반영한다. `flux2-dev` 프로파일은 참조 이미지를 지원하지 않으며, 자산 인페인트와 동시 사용은 불가하다.
+- **스타일 참조 이미지**: 최대 2장. Qwen-Image-Edit-2511이 무드·질감을 반영한다. `flux2-dev` 프로파일은 참조 이미지를 지원하지 않으며, 자산 인페인트와 동시 사용은 불가하다. **원격 백엔드(`PM_ENGINE=remote-comfy`)에서는 쓸 수 없다** — 반투명 전용 트랙과 함께 로컬 엔진 전용이다.
 - **자산 등록**: 알파 PNG만 받고 완전 불투명 코어를 요구한다(코어 해시 검증 전제). 삭제는 숨김(soft delete)이다.
 
 ## 디렉토리 구조
@@ -82,3 +89,4 @@ out/              # 산출물 기본 루트
 ## 문서
 
 - 아키텍처와 전체 파이프라인: [docs/architecture.md](docs/architecture.md)
+- 원격 백엔드(GCP): [gcp/README.md](gcp/README.md) (컨테이너·배포·모델 적재) · [infra/README.md](infra/README.md) (Terraform)

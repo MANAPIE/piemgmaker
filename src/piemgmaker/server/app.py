@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from piemgmaker import __version__
 from piemgmaker.assets_lib.registry import AssetRegistry, AssetRegistryError
 from piemgmaker.config import Config
+from piemgmaker.pipeline.capabilities import model_capability
 from piemgmaker.schemas.brief import SIZE_PRESETS, BriefInput
 from piemgmaker.schemas.manifest import build_manifest
 from piemgmaker.server.history import scan_jobs
@@ -180,19 +181,26 @@ def create_app(
 
     @app.get("/api/models")
     def models() -> dict:
+        # supports_* 는 프로파일 원본이 아니라 현재 엔진에서의 유효값이다 —
+        # build_job과 같은 model_capability()로 판정한다.
+        engine = {"engine": config.engine, "engine_flavor": config.engine_flavor}
         if store.profiles is None:
-            return {"default": None, "models": []}
+            return {**engine, "default": None, "models": []}
         return {
+            **engine,
             "default": store.profiles.default,
             "models": [
                 {
                     "id": p.id,
                     "label": p.label,
-                    "supports_styleref": bool(p.workflow_styleref),
-                    "supports_inpaint": bool(p.workflow_inpaint),
-                    "supports_native_alpha": bool(p.native_alpha),
+                    "supports_styleref": cap.supports_styleref,
+                    "supports_inpaint": cap.supports_inpaint,
+                    "supports_native_alpha": cap.supports_native_alpha,
                 }
-                for p in store.profiles.profiles
+                for p, cap in (
+                    (p, model_capability(p, config.engine_flavor))
+                    for p in store.profiles.profiles
+                )
             ],
         }
 
@@ -328,7 +336,7 @@ def create_app(
         workflows = [load_template(workflow_id)[1] for workflow_id in workflow_ids]
         report = build_manifest(
             config,
-            engine_name="local-comfy",
+            engine_name=config.engine,
             package_version=__version__,
             workflows=workflows,
             style_packs=store.packs,

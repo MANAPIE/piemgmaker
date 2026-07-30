@@ -23,6 +23,14 @@ profiles:
         - { name: qwen-image-edit-2511-Q8_0.gguf, kind: unet, sha256: ab4f0622fb002fccaaa679a2ecce6fd1b3190d8ea28a5b7b2b17b8669bc24afa }
         - { name: qwen_2.5_vl_7b_fp8_scaled.safetensors, kind: clip, sha256: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4 }
         - { name: qwen_image_vae.safetensors, kind: vae, sha256: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f }
+    remote:
+      backend_group: qwen
+      # 원격 GPU(L4 24GB)에 스택을 맞추기 위한 파일 치환 — 로컬은 Q8 유지.
+      # sha256은 HF LFS etag로 확인해 핀했고, fetch_models_remote.sh가 전송 시 재검증한다.
+      files:
+        - { replaces: Qwen_Image-Q8_0.gguf, name: Qwen_Image-Q6_K.gguf, sha256: 0c60643ee869161ee7acd530f7faf1cb2361f131e1ebae27b95fdc481b6df2b2 }
+      supports_styleref: false      # Edit 계열 모델을 원격에 올리지 않았다
+      supports_native_alpha: false  # Layered 계열 모델을 원격에 올리지 않았다
     native_alpha:
       workflow: object-gen-native-alpha-v1
       sampling: { steps: 20, cfg: 2.5 }
@@ -40,6 +48,14 @@ profiles:
     workflow_styleref: null      # v1 미지원 — 참조 이미지는 qwen-image 프로파일 사용
     supports_negative: false     # guidance 증류 모델 — 네거티브 미사용
     sampling: { steps: 20, cfg: 4.0 }
+    remote:
+      backend_group: flux2
+      # 원격 unet은 HF 배포 빌드(orabazes)를 쓴다 — 파일명은 로컬과 같지만 다른 Q8 빌드라 sha가 다르다.
+      # TE·VAE는 HF 배포본이 로컬 보유본과 sha까지 동일해 치환이 필요 없다.
+      files:
+        - { replaces: flux2-dev-Q8_0.gguf, name: flux2-dev-Q8_0.gguf, sha256: fe4622c714ad0d977913df9bebbd5a7a132204435e738669925d71d34e4169a9 }
+      supports_styleref: false
+      supports_native_alpha: false
     manifest:
       model_id: flux2-dev-q8-gguf
       files:

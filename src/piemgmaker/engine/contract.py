@@ -40,6 +40,8 @@ class JobHandle(BaseModel):
     seeds: list[int] = Field(min_length=1)
     remote_ids: list[str] = Field(min_length=1)
     output_index: int = 0  # payload.output_index 계승 — fetch가 회수할 출력 이미지
+    # payload.backend_group 계승 — 원격 백엔드가 여러 서비스로 나뉠 때 후속 요청의 라우팅 키
+    engine_group: str | None = None
 
 
 class JobStatus(BaseModel):
@@ -63,3 +65,5 @@ class WorkflowEngine(Protocol):
     def poll(self, handle: JobHandle) -> JobStatus: ...
 
     def fetch(self, handle: JobHandle, dest_dir: Path) -> list[CandidateResult]: ...
+
+    def cancel(self, handle: JobHandle) -> None: ...

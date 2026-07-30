@@ -6,3 +6,6 @@ __pycache__/
 out/
 dist/
 .DS_Store
+
+# VSCode Local History 확장 산출물
+.history/

@@ -18,8 +18,8 @@ import yaml
 
 from piemgmaker.assets_lib.library import AssetLibrary
 from piemgmaker.config import Config
+from piemgmaker.engine import create_engine
 from piemgmaker.engine.contract import WorkflowEngine
-from piemgmaker.engine.local_comfy import LocalComfyEngine
 from piemgmaker.engine.contract import JobCancelledError
 from piemgmaker.pipeline.orchestrate import build_job, execute_job
 from piemgmaker.schemas.brief import BriefInput
@@ -30,6 +30,17 @@ log = logging.getLogger(__name__)
 
 PENDING_STATES = {"queued", "preparing", "running", "postprocess"}
 IMAGE_KINDS = ("candidates", "final", "inputs")
+ENGINE_STATUS_TTL_S = 3.0
+# 엔진 상태 기본형 — state는 up(도달) / down(도달 불가) / idle(원격 유휴, 프로브 생략) /
+# unknown(큐를 보고하지 않는 엔진). 기존 키는 웹 계약 유지를 위해 그대로 둔다
+UNREACHABLE_ENGINE_STATUS = {
+    "reachable": False,
+    "busy": False,
+    "running": 0,
+    "pending": 0,
+    "external": 0,
+    "state": "down",
+}
 # submit 시 uuid4().hex[:12]로 생성 — 경로 결합 전 형식을 강제해 잡 디렉토리 밖으로의 탈출을 막는다
 JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
@@ -54,9 +65,12 @@ class JobStore:
         self.profiles = profiles
         self.jobs_root = config.storage / "jobs"
         self.jobs_root.mkdir(parents=True, exist_ok=True)
-        self._engine_factory = engine_factory or (lambda: LocalComfyEngine(config))
+        self._engine_factory = engine_factory or (lambda: create_engine(config))
         self._timeout_s = timeout_s
         self._queue: queue.Queue[str] = queue.Queue()
+        # 상태 프로브용 엔진은 재사용한다 — 폴링마다 새 HTTP 클라이언트를 만들지 않게
+        self._status_engine: WorkflowEngine | None = None
+        self._engine_cache: tuple[float, dict] | None = None
         self._fail_interrupted()
 
     def start_worker(self) -> None:
@@ -136,6 +150,7 @@ class JobStore:
                 profiles=self.profiles,
                 job_id=job_id,
                 workdir=job_dir / "inputs",
+                engine_flavor=self.config.engine_flavor,
             )
 
             def progress(state: str, done: int, total: int) -> None:
@@ -192,35 +207,51 @@ class JobStore:
             pass
         return None
 
-    def _engine_status(self, web_job_ids: set[str]) -> dict:
-        """ComfyUI 큐 상태. 웹 잡의 후보 프롬프트(pm_<id>)는 '외부'로 세지 않는다."""
+    def _engine_status(self, active: list[dict]) -> dict:
+        """엔진 큐 상태. 웹 잡의 후보 프롬프트(pm_<id>)는 '외부'로 세지 않는다."""
         now = time.time()
-        cached = getattr(self, "_engine_cache", None)
-        if cached and now - cached[0] < 3.0:
-            return cached[1]
-        status = {"reachable": False, "busy": False, "running": 0, "pending": 0, "external": 0}
-        try:
-            import httpx
-
-            resp = httpx.get(f"{self.config.backend_url}/queue", timeout=1.5)
-            if resp.status_code == 200:
-                q = resp.json()
-                entries = list(q.get("queue_running", [])) + list(q.get("queue_pending", []))
-                web_prefixes = {f"pm_{job_id}" for job_id in web_job_ids}
-                external = sum(
-                    1 for e in entries if self._entry_prefix(e) not in web_prefixes
-                )
-                status = {
-                    "reachable": True,
-                    "busy": bool(entries),
-                    "running": len(q.get("queue_running", [])),
-                    "pending": len(q.get("queue_pending", [])),
-                    "external": external,
-                }
-        except Exception:  # 엔진 미기동은 정상 상태 — 도달 불가로만 보고
-            pass
+        if self._engine_cache and now - self._engine_cache[0] < ENGINE_STATUS_TTL_S:
+            return self._engine_cache[1]
+        status = self._probe_engine(active)
         self._engine_cache = (now, status)
         return status
+
+    def _probe_engine(self, active: list[dict]) -> dict:
+        if self._status_engine is None:
+            self._status_engine = self._engine_factory()
+        snapshot = getattr(self._status_engine, "queue_snapshot", None)
+        if snapshot is None:
+            # 큐를 보고하지 않는 엔진(테스트 대역·HostedAPI 등)
+            return {**UNREACHABLE_ENGINE_STATUS, "state": "unknown"}
+        may_wake = getattr(self._status_engine, "probe_may_wake", False)
+        if may_wake and not active:
+            # 유휴 원격 인스턴스를 웹 폴링이 깨우면 GPU 과금이 시작된다 — 네트워크를 건드리지 않는다
+            return {**UNREACHABLE_ENGINE_STATUS, "state": "idle"}
+        result = snapshot(group=self._active_backend_group(active) if may_wake else None)
+        if not result.get("reachable"):
+            return {**UNREACHABLE_ENGINE_STATUS, "state": result.get("state", "down")}
+        web_prefixes = {f"pm_{job['job_id']}" for job in active}
+        return {
+            "reachable": True,
+            "busy": result["busy"],
+            "running": result["running"],
+            "pending": result["pending"],
+            "external": sum(
+                1 for e in result.get("entries", []) if self._entry_prefix(e) not in web_prefixes
+            ),
+            "state": "up",
+        }
+
+    def _active_backend_group(self, active: list[dict]) -> str | None:
+        """진행 중 잡의 backend_group — 다른 그룹의 유휴 원격 인스턴스를 프로브가 깨우지 않게 한다."""
+        # 실행 단계 잡을 우선한다 (queued는 payload.json이 아직 없을 수 있다)
+        ordered = sorted(active, key=lambda job: job.get("state") == "queued")
+        for job in ordered:
+            payload = self._read_json(self.jobs_root / job["job_id"] / "payload.json") or {}
+            group = payload.get("backend_group")
+            if group:
+                return group
+        return None
 
     def queue_snapshot(self) -> dict:
         """실시간 패널용 — 실행 중 잡 + 대기열(생성순) + 엔진 상태. 완료·실패는 제외한다."""
@@ -264,7 +295,7 @@ class JobStore:
         return {
             "running": running[0] if running else None,
             "queued": queued,
-            "engine": self._engine_status({j["job_id"] for j in active}),
+            "engine": self._engine_status(active),
         }
 
     def detail(self, job_id: str) -> dict:

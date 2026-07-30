@@ -32,3 +32,6 @@ class HostedAPIEngine:
 
     def fetch(self, handle: JobHandle, dest_dir: Path) -> list[CandidateResult]:
         raise NotImplementedError("HostedAPI 실 구현은 아직 제공되지 않습니다")
+
+    def cancel(self, handle: JobHandle) -> None:
+        raise NotImplementedError("HostedAPI 실 구현은 아직 제공되지 않습니다")

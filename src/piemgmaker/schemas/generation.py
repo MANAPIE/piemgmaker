@@ -52,6 +52,8 @@ class JobPayload(BaseModel):
     # 워크플로우가 여러 장을 출력할 때 회수할 인덱스 — 네이티브 알파(Layered)는
     # [컴포지트, 레이어...] 순서라 마지막(-1)이 투명 오브젝트 레이어다
     output_index: int = 0
+    # 원격 백엔드의 모델 계열 서비스 선택 키 (로컬 실행은 None — 기존 payload.json 하위 호환)
+    backend_group: str | None = None
 
     @computed_field
     @property

@@ -1,0 +1,9 @@
+# 실값이 담기는 파일 — *.example만 커밋한다
+terraform.tfvars
+*.auto.tfvars
+
+# 로컬 작업 산출물. .terraform.lock.hcl은 provider 핀이라 커밋 대상이다
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log

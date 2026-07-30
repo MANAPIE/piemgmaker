@@ -1,0 +1,15 @@
+# terraform.tfvars로 복사해 실제 값을 채운다. terraform.tfvars는 커밋하지 않는다.
+
+# bootstrap.sh에 넘긴 것과 같은 프로젝트 ID
+project_id = "gcp-project-id"
+
+# Cloud Run GPU가 제공되는 최인접 리전. 바꾸려면 GPU 가용 리전인지 먼저 확인한다.
+region = "asia-southeast1"
+
+# gcloud billing accounts list로 확인한 ID
+billing_account = "XXXXXX-XXXXXX-XXXXXX"
+
+# 결제 계정 통화 단위 — KRW 계정이면 원(예: 220000 ≈ $150), USD 계정이면 달러(예: 150)
+budget_amount = 220000
+
+alert_email = "<알림 받을 이메일>"

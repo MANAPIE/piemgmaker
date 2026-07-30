@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -229,7 +231,52 @@ def test_참조_이미지_업로드는_경로를_돌려주고_미리보기로_�
 
 def test_models_라우트는_프로파일_없으면_빈_목록이다(api):
     client, _ = api
-    assert client.get("/api/models").json() == {"default": None, "models": []}
+    assert client.get("/api/models").json() == {
+        "engine": "local-comfy",
+        "engine_flavor": "local",
+        "default": None,
+        "models": [],
+    }
+
+
+def test_models_라우트의_supports는_엔진별_유효값이다(tmp_path):
+    """프로파일 원본을 그대로 내보내면 UI가 쓸 수 있다고 표시한 뒤 제출에서 실패한다."""
+    from piemgmaker.schemas.model_profile import load_model_profiles
+    from piemgmaker.server.app import create_app
+
+    profiles_path = Path(__file__).resolve().parents[1] / "model_profiles.yaml"
+    profiles = load_model_profiles(profiles_path)
+
+    def models_for(env: dict[str, str]) -> dict[str, dict]:
+        config = load_config(env={"PM_STORAGE": str(tmp_path / "out"), **env})
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir(exist_ok=True)
+        (assets_dir / "manifest.yaml").write_text("assets: []\n", encoding="utf-8")
+        store = JobStore(
+            config,
+            {"test-pack": make_pack()},
+            assets_dir,
+            engine_factory=lambda: FakeEngine(lambda seed: blob_512()),
+            profiles=profiles,
+        )
+        body = TestClient(create_app(store, config, assets_dir)).get("/api/models").json()
+        return body["engine_flavor"], {m["id"]: m for m in body["models"]}
+
+    local_flavor, local_models = models_for({})
+    remote_flavor, remote_models = models_for(
+        {"PM_ENGINE": "remote-comfy", "PM_REMOTE_URL_QWEN": "https://example.invalid"}
+    )
+
+    assert (local_flavor, remote_flavor) == ("local", "remote")
+
+    # qwen-image는 로컬에서 참조 이미지·네이티브 알파를 지원하지만 원격에서는 둘 다 못 쓴다
+    assert local_models["qwen-image"]["supports_styleref"] is True
+    assert local_models["qwen-image"]["supports_native_alpha"] is True
+    assert remote_models["qwen-image"]["supports_styleref"] is False
+    assert remote_models["qwen-image"]["supports_native_alpha"] is False
+
+    # 생성·인페인팅은 원격에서도 유지된다
+    assert remote_models["qwen-image"]["supports_inpaint"] is True
 
 
 def test_샘플은_API로_서빙돼_빌드_이후_추가분도_반영된다(tmp_path):

@@ -18,6 +18,7 @@ import {
   type BriefInput,
   type JobDetail,
   type ModelOption,
+  type ModelsResponse,
   type SampleInfo,
   type StylePackOption,
 } from "@/lib/api";
@@ -79,6 +80,8 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
   const [presets, setPresets] = useState<Record<string, number[]>>({});
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [models, setModels] = useState<ModelOption[]>([]);
+  // null = 아직 모름. 모르는 상태를 "로컬"로 단정하면 원격인데 로컬로 표시되므로 배지를 감춘다.
+  const [engineFlavor, setEngineFlavor] = useState<"local" | "remote" | null>(null);
   const [samples, setSamples] = useState<SampleInfo[]>([]);
 
   const [campaignText, setCampaignText] = useState("");
@@ -111,9 +114,10 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
     api<{ assets: AssetInfo[] }>("assets")
       .then((data) => setAssets(data.assets))
       .catch(() => setAssets([]));
-    api<{ default: string | null; models: ModelOption[] }>("models")
+    api<ModelsResponse>("models")
       .then((data) => {
         setModels(data.models);
+        setEngineFlavor(data.engine_flavor ?? null);
         if (data.default) setModel((prev) => prev || data.default!);
       })
       .catch(() => setModels([]));
@@ -156,6 +160,14 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
   const consistencyWarning = selectedPacks.length > 1 || freeText.trim() !== "";
   const refsBlocked = currentModel ? !currentModel.supports_styleref : false;
   const conflict = selectedAssets.length > 0 && refs.length > 0;
+
+  // 트랙을 못 쓰면 trimap으로 강등되지만 잡은 성공한다 — 차단하지 않고 품질 저하만 알린다.
+  const translucentDowngrade =
+    !!currentModel &&
+    !currentModel.supports_native_alpha &&
+    selectedPacks.some(
+      (id) => packs.find((p) => p.id === id)?.material_class === "translucent",
+    );
 
   function toggle(list: string[], value: string, set: (next: string[]) => void) {
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
@@ -238,7 +250,28 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
       <Section title="모델 · 스타일">
         {models.length > 0 && (
           <div>
-            <label className={label}>생성 모델</label>
+            <div className="flex items-center gap-2">
+              <label className={label}>생성 모델</label>
+              {/* 어느 백엔드로 생성되는지 — 아래 제약 안내가 이 값에 따라 달라진다 */}
+              {engineFlavor && (
+                <span
+                  className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink-soft)]"
+                  title={
+                    engineFlavor === "remote"
+                      ? "원격 백엔드(GCP)에서 생성합니다 — 생성·인페인팅만 지원합니다"
+                      : "로컬 ComfyUI에서 생성합니다 — 모든 기능을 쓸 수 있습니다"
+                  }
+                >
+                  {engineFlavor === "remote" ? "원격 (GCP)" : "로컬"}
+                </span>
+              )}
+            </div>
+            {engineFlavor === "remote" && (
+              <p className={help}>
+                원격 백엔드는 생성·인페인팅만 지원합니다. 스타일 참조 이미지와 반투명 전용
+                트랙은 로컬 엔진에서만 쓸 수 있습니다.
+              </p>
+            )}
             <div className="mt-1.5 flex flex-wrap gap-2">
               {models.map((option) => (
                 <Chip
@@ -316,6 +349,13 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
               팩 혼합·자유 입력 사용 — 스타일 일관성은 보증되지 않습니다
             </p>
           )}
+          {translucentDowngrade && (
+            <p className="mt-1.5 text-xs font-medium text-[var(--warn)]">
+              반투명 전용 트랙(native alpha)을 쓸 수 없어 trimap으로 처리됩니다 — 유리·반투명
+              재질의 알파가 덜 정확할 수 있습니다
+              {engineFlavor === "remote" ? " (로컬 엔진에서는 전용 트랙을 씁니다)" : ""}
+            </p>
+          )}
         </div>
         <div>
           <label className={label}>스타일 참조 이미지 (최대 2장)</label>
@@ -324,7 +364,9 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
           </p>
           {refsBlocked ? (
             <p className="mt-1.5 text-xs text-[var(--warn)]">
-              선택한 모델은 참조 이미지를 지원하지 않습니다 — Qwen-Image를 선택하세요
+              {engineFlavor === "remote"
+                ? "원격 백엔드에서는 참조 이미지를 쓸 수 없습니다 — 로컬 엔진에서 Qwen-Image로 실행하세요"
+                : "선택한 모델은 참조 이미지를 지원하지 않습니다 — Qwen-Image를 선택하세요"}
             </p>
           ) : (
             <div className="mt-2 flex items-center gap-3">

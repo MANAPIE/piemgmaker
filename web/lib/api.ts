@@ -111,12 +111,20 @@ export function sampleUrl(file: string): string {
   return `/api/pm/samples/${file}`;
 }
 
+// supports_* 는 프로파일 원본이 아니라 현재 백엔드에서의 유효값이다 (원격은 생성·인페인팅만 지원).
 export type ModelOption = {
   id: string;
   label: string;
   supports_styleref: boolean;
   supports_inpaint: boolean;
   supports_native_alpha: boolean;
+};
+
+export type ModelsResponse = {
+  engine: string;
+  engine_flavor: "local" | "remote";
+  default: string | null;
+  models: ModelOption[];
 };
 
 export type AssetVariantInfo = { id: string; archived: boolean; tags: string[] };

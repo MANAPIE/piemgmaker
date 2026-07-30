@@ -20,7 +20,8 @@ from PIL import Image
 from pydantic import ValidationError
 
 from piemgmaker.assets_lib.library import AssetLibrary, file_sha256
-from piemgmaker.config import Config
+from piemgmaker.config import Config, EngineFlavor
+from piemgmaker.pipeline.capabilities import model_capability
 from piemgmaker.engine.contract import (
     CandidateResult,
     JobCancelledError,
@@ -281,6 +282,7 @@ class BuildResult:
     assets: list[AssetLayer] = field(default_factory=list)
     input_images: dict[str, str] = field(default_factory=dict)
     skip_matting: bool = False
+    backend_group: str | None = None  # 원격 실행에서 잡을 받을 모델 계열 서비스
 
     def _variant_for(self, strategy: MattingStrategyId | None) -> GraphVariant:
         needs_fragment = strategy is not None and STRATEGY_FRAGMENTS[strategy] is not None
@@ -336,6 +338,7 @@ class BuildResult:
             assets=[layer.resolved for layer in self.assets],
             input_images=self.input_images,
             output_index=output_index,
+            backend_group=self.backend_group,
         )
 
 
@@ -348,6 +351,7 @@ def build_job(
     job_id: str | None = None,
     workdir: Path | None = None,
     skip_matting: bool = False,
+    engine_flavor: EngineFlavor = "local",
 ) -> BuildResult:
     job_id = job_id or uuid.uuid4().hex[:12]
     registry = registry or MattingNodeRegistry()
@@ -375,8 +379,22 @@ def build_job(
     elif brief.model:
         raise OrchestrationError("모델 선택(brief.model)에는 프로파일 레지스트리가 필요합니다")
 
-    # 네이티브 알파 미지원 프로파일(FLUX.2 등)의 translucent는 trimap으로 바로 강등
-    if profile is not None and profile.native_alpha is None:
+    remote = None
+    if engine_flavor == "remote":
+        if profile is None:
+            raise OrchestrationError("원격 백엔드 실행에는 모델 프로파일 레지스트리가 필요합니다")
+        if profile.remote is None:
+            raise OrchestrationError(
+                f"{profile.id!r} 프로파일은 원격 백엔드를 지원하지 않습니다 "
+                "(model_profiles.yaml의 remote 블록 부재)"
+            )
+        remote = profile.remote
+
+    # /api/models와 같은 판정을 쓴다 — UI 표시와 여기서의 실패가 어긋나지 않게.
+    capability = model_capability(profile, engine_flavor) if profile is not None else None
+
+    # 네이티브 알파 미지원 프로파일(FLUX.2 등)·원격 백엔드의 translucent는 trimap으로 바로 강등
+    if capability is not None and not capability.supports_native_alpha:
         chain = [s for s in chain if s != "native_alpha"]
         if not chain:
             raise OrchestrationError(f"{profile.id!r} 프로파일로 실행 가능한 배경 제거 전략이 없습니다")
@@ -389,9 +407,15 @@ def build_job(
         if refs:
             if material == "translucent":
                 raise OrchestrationError("참조 이미지는 translucent 팩과 동시 사용을 지원하지 않습니다 (v1)")
-            if not profile.workflow_styleref:
+            # 판정은 capability 하나로 하고, 분기는 사용자에게 보일 문구를 고르는 데만 쓴다.
+            if capability is not None and not capability.supports_styleref:
+                if not profile.workflow_styleref:
+                    raise OrchestrationError(
+                        f"{profile.id!r} 프로파일은 참조 이미지를 지원하지 않습니다 — qwen-image를 사용하세요"
+                    )
                 raise OrchestrationError(
-                    f"{profile.id!r} 프로파일은 참조 이미지를 지원하지 않습니다 — qwen-image를 사용하세요"
+                    f"{profile.id!r} 프로파일의 원격 백엔드는 참조 이미지를 지원하지 않습니다 "
+                    "— 로컬 엔진(PM_ENGINE 미설정)으로 실행하세요"
                 )
             workflow_id = profile.workflow_styleref
             manifest = profile.styleref_manifest or profile.manifest
@@ -424,6 +448,16 @@ def build_job(
                 )
         else:
             workflow_id = primary.workflow_template
+
+    # ── 원격 파일 셋 적용 (원격 GPU에 맞춘 양자화 변형 등) ──
+    if remote is not None:
+        try:
+            manifest = remote.apply(manifest)
+            if fallback_plan is not None:
+                fb_workflow, fb_manifest, fb_sampling = fallback_plan
+                fallback_plan = (fb_workflow, remote.apply(fb_manifest), fb_sampling)
+        except ValueError as exc:
+            raise OrchestrationError(str(exc)) from exc
 
     # ── 입력 이미지 준비 (자산 선배치 / 참조 이미지 사본) ──
     assets: list[AssetLayer] = []
@@ -480,6 +514,7 @@ def build_job(
         assets=assets,
         input_images=input_images,
         skip_matting=skip_matting,
+        backend_group=remote.backend_group if remote else None,
     )
 
 
