@@ -240,12 +240,25 @@ def test_models_라우트는_프로파일_없으면_빈_목록이다(api):
 
 
 def test_models_라우트의_supports는_엔진별_유효값이다(tmp_path):
-    """프로파일 원본을 그대로 내보내면 UI가 쓸 수 있다고 표시한 뒤 제출에서 실패한다."""
-    from piemgmaker.schemas.model_profile import load_model_profiles
-    from piemgmaker.server.app import create_app
+    """프로파일 원본을 그대로 내보내면 UI가 쓸 수 있다고 표시한 뒤 제출에서 실패한다.
 
-    profiles_path = Path(__file__).resolve().parents[1] / "model_profiles.yaml"
-    profiles = load_model_profiles(profiles_path)
+    리포 프로파일은 원격 지원 여부가 바뀔 수 있으므로, 원격이 styleref를 허용하지 않는
+    합성 프로파일로 유효값 차이를 고정 검증한다.
+    """
+    from piemgmaker.schemas.model_profile import RemoteSpec
+    from piemgmaker.server.app import create_app
+    from tests.test_model_profiles import make_registry
+
+    base = make_registry()
+    spec = RemoteSpec(backend_group="qwen")  # supports_* 기본 False — 원격 미허용 케이스
+    profiles = base.model_copy(
+        update={
+            "profiles": [
+                p.model_copy(update={"remote": spec}) if p.id == "qwen-image" else p
+                for p in base.profiles
+            ]
+        }
+    )
 
     def models_for(env: dict[str, str]) -> dict[str, dict]:
         config = load_config(env={"PM_STORAGE": str(tmp_path / "out"), **env})

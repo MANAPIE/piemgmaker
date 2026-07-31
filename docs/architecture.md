@@ -85,7 +85,8 @@ class WorkflowEngine(Protocol):
 - **ComfyUI는 `--disable-dynamic-vram`으로 띄운다.** 기본값인 지연 적재는 가중치 조각마다 GCS 왕복을 만들어 네트워크 파일시스템에서 치명적이다. **`--disable-mmap`은 넣지 않는다 — 같은 마운트에서 TE 읽기가 8배 느려진다.**
 - 성능·비용 현황(qwen / L4 실측): 컨테이너 기동 31초, 모델 적재 약 6분 20초, 잡 1건 8~9분, 잡당 약 $0.24. 와치독 창 안의 두 번째 잡은 적재를 건너뛴다. 시간당 단가는 qwen $1.71 / flux2 $3.82이고, 상시 비용은 버킷·이미지·캐시로 월 $10 안팎이다.
 - ComfyUI나 커스텀 노드 버전을 올린 뒤에는 잡 1건의 구간별 소요를 다시 측정한다 — 적재 관련 기본값이 바뀌면 이 구간이 조용히 되돌아간다.
-- **원격은 생성·인페인팅만 지원한다.** 스타일 참조(Edit 계열)와 네이티브 알파(Layered 계열)는 프로파일의 `remote.supports_*`가 허용해야 쓸 수 있고, 현재는 해당 모델 파일을 버킷에 올리지 않아 둘 다 `false`다. 원격에서 translucent 팩은 trimap으로 강등된다(잡은 성공하고 알파 정확도만 떨어진다).
+- **원격 능력은 프로파일의 `remote.supports_*` 선언이 결정한다.** qwen-image는 생성·인페인팅에 더해 스타일 참조(Edit 2511)·네이티브 알파(Layered)까지 지원한다 — 세 unet 모두 L4에 맞춘 Q6_K 변형으로 버킷에 있고, 잡 종류에 따라 `remote.files` 치환이 해당 매니페스트에 적용된다. flux2-dev는 로컬과 동일하게 styleref·native_alpha가 없다(translucent는 trimap 강등 — 잡은 성공하고 알파 정확도만 떨어진다).
+- qwen 서비스 하나가 unet 3종(base·Edit·Layered)을 잡 종류에 따라 번갈아 올린다. **unet 전환마다 ~3분 재적재**가 붙고(TE는 공유라 유지), 와치독 창 안이라도 다른 unet을 쓰는 잡은 이 비용을 치른다.
 - 능력 판정은 `pipeline/capabilities.py`의 `model_capability()` 하나가 소유하고, `build_job`의 실패 판정과 `/api/models` 응답이 이를 공유한다 — 각자 판정하면 "UI는 쓸 수 있다고 표시하는데 제출하면 실패"가 된다. 따라서 `/api/models`의 `supports_*`는 프로파일 원본이 아니라 **현재 엔진에서의 유효값**이다.
 
 ## 5. 파이프라인 & 데이터 흐름

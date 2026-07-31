@@ -5,15 +5,9 @@
 # - 버킷 경로는 gs://<PROJECT_ID>-models/ 기준이다. extra_model_paths.yaml이 /models/unet·clip·vae로 매핑한다.
 # - 로컬 원본 탐색은 스크립트가 폴백 처리한다: clip/ ↔ text_encoders/, unet/ ↔ diffusion_models/.
 # - 이 목록은 model_profiles.yaml의 remote 블록과 1:1이어야 한다.
-#   styleref(Edit)·native_alpha(Layered) 계열은 원격 미지원(supports_* false)이라 여기 없다.
-# - sha256이 -가 아니면 download_models.sh가 다운로드 후 대조한다. 값을 확정하면
-#   model_profiles.yaml의 remote 블록에도 함께 핀하라.
-# - URL은 2026-07-28 HEAD 요청으로 실재·크기를 확인했다 (주석의 크기 참고).
-#
-# 참고: sha256은 전부 HF LFS etag(= 파일 sha256)로 확인해 핀했다 (2026-07-29).
-#       clip·vae 4종은 로컬 보유본과 sha까지 동일한 배포본이다.
-#       flux2 unet은 로컬 보유본(35.00GB)과 다른 Q8 빌드(orabazes, 34.47GB)다 —
-#       원격은 이 HF 빌드를 쓰기로 확정했고 model_profiles.yaml의 remote 블록에 같은 sha로 핀돼 있다.
+# - sha256이 -가 아니면 전송 시 대조한다. 값은 HF LFS etag(= 파일 sha256)로 핀하고,
+#   확정하면 model_profiles.yaml의 remote 블록에도 함께 핀하라.
+#   새 항목의 etag 확인: curl -sI <URL> | grep -i x-linked-etag
 #
 # 16.8GB — qwen 원격 전용 (L4 24GB 수용을 위한 Q6_K 변형, 로컬은 Q8 유지)
 unet/Qwen_Image-Q6_K.gguf	https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q6_K.gguf	0c60643ee869161ee7acd530f7faf1cb2361f131e1ebae27b95fdc481b6df2b2
@@ -21,7 +15,13 @@ unet/Qwen_Image-Q6_K.gguf	https://huggingface.co/QuantStack/Qwen-Image-GGUF/reso
 clip/qwen_2.5_vl_7b_fp8_scaled.safetensors	https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors	cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4
 # 0.25GB — qwen VAE
 vae/qwen_image_vae.safetensors	https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors	a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
-# 34.5GB — flux2 unet (위 주의 블록 참조: 로컬 보유본과 다른 빌드)
+# 16.9GB — qwen styleref(Edit 2511) unet. base unet과 달리 QuantStack 리포가 없어 unsloth 빌드를 쓴다
+unet/qwen-image-edit-2511-Q6_K.gguf	https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q6_K.gguf	fdc28e5b8f7d9cfe0399fd1700c375f25f000fc4159bbdb0d4a809ae898eb759
+# 16.9GB — qwen native_alpha(Layered) unet (unsloth 빌드)
+unet/qwen-image-layered-Q6_K.gguf	https://huggingface.co/unsloth/Qwen-Image-Layered-GGUF/resolve/main/qwen-image-layered-Q6_K.gguf	9008bd45e6918671ff6d1b6e8e46374c12a8339a4e26740426b0f557958e5431
+# 0.25GB — Layered 전용 VAE (로컬 보유본과 sha 동일 배포본이라 프로파일 치환은 불필요)
+vae/qwen_image_layered_vae.safetensors	https://huggingface.co/Comfy-Org/Qwen-Image-Layered_ComfyUI/resolve/main/split_files/vae/qwen_image_layered_vae.safetensors	c5320595fc61859ccdd0282184208f7b781c983b8ce4c6bc3e7723a807d3d28d
+# 34.5GB — flux2 unet. 파일명은 로컬 보유본과 같지만 다른 Q8 빌드(orabazes)라 sha가 다르다
 unet/flux2-dev-Q8_0.gguf	https://huggingface.co/orabazes/FLUX.2-dev-GGUF/resolve/main/flux2_dev_Q8_0.gguf	fe4622c714ad0d977913df9bebbd5a7a132204435e738669925d71d34e4169a9
 # 18.0GB — flux2 텍스트 인코더 fp8 (필수 — bf16 대체 불가 운영 수칙)
 clip/mistral_3_small_flux2_fp8.safetensors	https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors	e3467b7d912a234fb929cdf215dc08efdb011810b44bc21081c4234cc75b370e

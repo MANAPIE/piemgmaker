@@ -49,15 +49,15 @@ class RemoteSpec(BaseModel):
         return self
 
     def apply(self, manifest: ModelManifest) -> ModelManifest:
-        """로컬 매니페스트에 원격 파일 치환을 적용한 사본을 만든다."""
+        """로컬 매니페스트에 원격 파일 치환을 적용한 사본을 만든다.
+
+        매칭되는 치환만 적용한다 — 프로파일의 매니페스트(base·styleref·native_alpha)마다
+        unet이 달라, 한 files 목록이 세 매니페스트의 치환을 함께 담기 때문이다.
+        치환 대상 오타는 ModelProfile 로드 시점 검증이 잡는다.
+        """
         if not self.files:
             return manifest
         overrides = {f.replaces: f for f in self.files}
-        unknown = sorted(set(overrides) - {f.name for f in manifest.files})
-        if unknown:
-            raise ValueError(
-                f"원격 파일 치환 대상이 매니페스트 {manifest.model_id!r}에 없습니다: {unknown}"
-            )
         files = []
         for file in manifest.files:
             override = overrides.get(file.name)
@@ -81,6 +81,24 @@ class ModelProfile(BaseModel):
     styleref_manifest: ModelManifest | None = None  # 참조 이미지 경로가 다른 모델을 쓰는 경우(Edit 계열)
     native_alpha: NativeAlphaSpec | None = None
     remote: RemoteSpec | None = None  # 원격 백엔드 지원 선언 (없으면 로컬 전용 프로파일)
+
+    @model_validator(mode="after")
+    def _check_remote_overrides(self) -> "ModelProfile":
+        # apply()가 매칭만 적용하는 대신, 오타 탐지는 여기서 한다 — 모든 치환 대상이
+        # 이 프로파일의 매니페스트 중 최소 한 곳에는 존재해야 한다.
+        if self.remote is None or not self.remote.files:
+            return self
+        known: set[str] = {f.name for f in self.manifest.files}
+        if self.styleref_manifest is not None:
+            known |= {f.name for f in self.styleref_manifest.files}
+        if self.native_alpha is not None:
+            known |= {f.name for f in self.native_alpha.manifest.files}
+        unknown = sorted({f.replaces for f in self.remote.files} - known)
+        if unknown:
+            raise ValueError(
+                f"{self.id!r}의 remote.files 치환 대상이 어느 매니페스트에도 없습니다: {unknown}"
+            )
+        return self
 
 
 class ModelProfileRegistry(BaseModel):

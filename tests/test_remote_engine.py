@@ -337,18 +337,65 @@ class TestRemoteBuild:
                 engine_flavor="remote",
             )
 
-    def test_치환_대상이_매니페스트에_없으면_빌드가_실패한다(self):
+    def test_치환_대상이_어느_매니페스트에도_없으면_로드_시점에_거부된다(self):
+        # apply()가 매칭만 적용하는 대신 오타 탐지는 프로파일 로드(model_validate)가 맡는다 —
+        # 잡 빌드보다 이른 시점이라 잘못된 프로파일 파일이 서버 기동 자체를 막는다.
+        base = make_registry()
+        data = base.model_dump()
+        data["profiles"][0]["remote"] = {
+            "backend_group": "qwen",
+            "files": [{"replaces": "없는파일.gguf", "name": "q6.gguf"}],
+        }
+        with pytest.raises(ValueError, match="어느 매니페스트에도 없습니다"):
+            ModelProfileRegistry.model_validate(data)
+
+    def test_치환은_styleref와_native_alpha_매니페스트에도_각각_적용된다(self, tmp_path):
         spec = RemoteSpec(
             backend_group="qwen",
-            files=[RemoteFileOverride(replaces="없는파일.gguf", name="q6.gguf")],
+            files=[
+                RemoteFileOverride(replaces="qwen.gguf", name="qwen-q6.gguf"),
+                RemoteFileOverride(replaces="qwen_edit.gguf", name="edit-q6.gguf"),
+                RemoteFileOverride(replaces="layered.gguf", name="layered-q6.gguf"),
+            ],
+            supports_styleref=True,
+            supports_native_alpha=True,
         )
-        with pytest.raises(OrchestrationError, match="치환 대상"):
-            build_job(
-                BriefInput.model_validate(BRIEF_BASE),
-                {"test-pack": make_pack()},
-                profiles=registry_with_remote(spec),
-                engine_flavor="remote",
-            )
+        # styleref 경로 — edit unet만 치환되고 공유 TE·VAE는 그대로다
+        ref = tmp_path / "ref.png"
+        Image.fromarray(make_rgba(64, 64, (200, 30, 30, 255)), "RGBA").save(ref)
+        brief = BriefInput.model_validate({**BRIEF_BASE, "reference_images": [str(ref)]})
+        build = build_job(
+            brief,
+            {"test-pack": make_pack()},
+            profiles=registry_with_remote(spec),
+            workdir=tmp_path / "in",
+            engine_flavor="remote",
+        )
+        payload = build.payload_for(None, build.seeds)
+        assert [f.name for f in payload.model_manifest.files] == [
+            "edit-q6.gguf",
+            "qwen_te.safetensors",
+            "qwen_vae.safetensors",
+        ]
+
+        # native_alpha 경로 — 강등 없이 전용 워크플로우와 layered 치환본으로 빌드된다
+        pack = make_pack(
+            material_class="translucent", matting={"strategy": "native_alpha", "model": "m"}
+        )
+        build = build_job(
+            BriefInput.model_validate(BRIEF_BASE),
+            {"test-pack": pack},
+            profiles=registry_with_remote(spec),
+            engine_flavor="remote",
+        )
+        assert build.chain[0] == "native_alpha"
+        assert build.primary.workflow_ref.id == "object-gen-native-alpha-v1"
+        payload = build.payload_for(None, build.seeds)
+        assert payload.model_manifest.files[0].name == "layered-q6.gguf"
+        # trimap 폴백은 base 치환본으로 돌아간다
+        assert build.fallback is not None
+        fb_payload = build.payload_for("trimap", build.seeds)
+        assert fb_payload.model_manifest.files[0].name == "qwen-q6.gguf"
 
     def test_프로파일_레지스트리_없이는_원격_실행을_거부한다(self):
         with pytest.raises(OrchestrationError, match="모델 프로파일"):
@@ -364,8 +411,16 @@ def test_리포_프로파일은_두_계열_모두_원격_그룹과_파일_셋을
     qwen = registry.get("qwen-image")
     flux2 = registry.get("flux2-dev")
     assert (qwen.remote.backend_group, flux2.remote.backend_group) == ("qwen", "flux2")
-    # qwen은 원격 GPU 용량에 맞춰 unet을 Q6_K로 치환한다
+    # qwen은 원격 GPU 용량에 맞춰 세 매니페스트(base·styleref·native_alpha)의 unet을 Q6_K로 치환한다
     assert [f.name for f in qwen.remote.apply(qwen.manifest).files][0] == "Qwen_Image-Q6_K.gguf"
+    assert (
+        qwen.remote.apply(qwen.styleref_manifest).files[0].name == "qwen-image-edit-2511-Q6_K.gguf"
+    )
+    assert (
+        qwen.remote.apply(qwen.native_alpha.manifest).files[0].name
+        == "qwen-image-layered-Q6_K.gguf"
+    )
+    assert qwen.remote.supports_styleref and qwen.remote.supports_native_alpha
     # flux2는 파일명은 로컬과 같지만 원격 unet이 다른 Q8 빌드(HF 배포본)라 sha만 갈린다
     flux2_remote = flux2.remote.apply(flux2.manifest)
     assert [f.name for f in flux2_remote.files] == [f.name for f in flux2.manifest.files]

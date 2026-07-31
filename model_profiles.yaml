@@ -26,11 +26,14 @@ profiles:
     remote:
       backend_group: qwen
       # 원격 GPU(L4 24GB)에 스택을 맞추기 위한 파일 치환 — 로컬은 Q8 유지.
+      # 치환은 base·styleref·native_alpha 매니페스트에 각각 매칭되는 것만 적용된다.
       # sha256은 HF LFS etag로 확인해 핀했고, fetch_models_remote.sh가 전송 시 재검증한다.
       files:
         - { replaces: Qwen_Image-Q8_0.gguf, name: Qwen_Image-Q6_K.gguf, sha256: 0c60643ee869161ee7acd530f7faf1cb2361f131e1ebae27b95fdc481b6df2b2 }
-      supports_styleref: false      # Edit 계열 모델을 원격에 올리지 않았다
-      supports_native_alpha: false  # Layered 계열 모델을 원격에 올리지 않았다
+        - { replaces: qwen-image-edit-2511-Q8_0.gguf, name: qwen-image-edit-2511-Q6_K.gguf, sha256: fdc28e5b8f7d9cfe0399fd1700c375f25f000fc4159bbdb0d4a809ae898eb759 }
+        - { replaces: qwen-image-layered-Q8_0.gguf, name: qwen-image-layered-Q6_K.gguf, sha256: 9008bd45e6918671ff6d1b6e8e46374c12a8339a4e26740426b0f557958e5431 }
+      supports_styleref: true
+      supports_native_alpha: true
     native_alpha:
       workflow: object-gen-native-alpha-v1
       sampling: { steps: 20, cfg: 2.5 }
