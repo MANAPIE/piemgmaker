@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   api,
   imageUrl,
-  postJson,
   type HistoryPage,
   type StylePackOption,
 } from "@/lib/api";
@@ -17,7 +15,6 @@ const STATE_BADGE: Record<string, string> = {
 };
 
 export default function HistoryPage() {
-  const router = useRouter();
   const [data, setData] = useState<HistoryPage | null>(null);
   const [packs, setPacks] = useState<StylePackOption[]>([]);
   const [query, setQuery] = useState("");
@@ -42,14 +39,6 @@ export default function HistoryPage() {
       })
       .catch((e: Error) => setError(e.message));
   }, [query, pack, page]);
-
-  async function rerun(jobId: string) {
-    // 잡 페이로드 버전 핀·시드 재현
-    const { job_id } = await postJson<{ job_id: string }>(`jobs/${jobId}/rerun`, {
-      new_seed: false,
-    });
-    router.push(`/history/${job_id}`);
-  }
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
@@ -129,12 +118,6 @@ export default function HistoryPage() {
                 {item.state}
                 {item.selected ? " · 확정" : ""}
               </span>
-              <button
-                onClick={() => rerun(item.job_id)}
-                className="shrink-0 rounded-md border border-[var(--line)] bg-white px-2.5 py-1.5 text-xs hover:border-[var(--mat)]/50"
-              >
-                이 설정으로 다시 생성
-              </button>
             </li>
           ))}
           {data && data.items.length === 0 && (

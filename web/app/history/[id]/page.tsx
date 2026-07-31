@@ -44,8 +44,15 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     return () => clearInterval(timer);
   }, [detail, refresh]);
 
-  async function rerunNewSeed() {
-    const { job_id } = await postJson<{ job_id: string }>(`jobs/${id}/rerun`, { new_seed: true });
+  // 생성이 시작되는 버튼은 재차 확인을 받는다 — 잡 하나가 원격 GPU 과금·수 분 실행이다.
+  async function rerun(newSeed: boolean) {
+    const what = newSeed ? "같은 설정 + 새 시드로" : "이 설정 그대로(같은 시드)";
+    const subject = detail?.brief?.object_concept;
+    const message = `${what} 다시 생성할까요?${subject ? `\n"${subject}"` : ""}`;
+    if (!confirm(message)) return;
+    const { job_id } = await postJson<{ job_id: string }>(`jobs/${id}/rerun`, {
+      new_seed: newSeed,
+    });
     router.push(`/history/${job_id}`);
   }
 
@@ -94,9 +101,15 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={rerunNewSeed}
+            onClick={() => rerun(false)}
+            className="rounded-md border border-[var(--line)] bg-white px-3.5 py-2 text-sm hover:border-[var(--mat)]/50"
+          >
+            이 설정으로 다시 생성
+          </button>
+          <button
+            onClick={() => rerun(true)}
             className="rounded-md border border-[var(--line)] bg-white px-3.5 py-2 text-sm hover:border-[var(--mat)]/50"
           >
             같은 설정 + 새 시드

@@ -190,6 +190,8 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    // 생성 시작은 재차 확인을 받는다 — 잡 하나가 원격 GPU 과금·수 분 실행이고 비용은 후보 수에 비례한다.
+    if (!confirm(`생성을 시작할까요? (후보 ${count}장)`)) return;
     setError(null);
     setSubmitting(true);
     const brief: BriefInput = {
@@ -258,20 +260,14 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
                   className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink-soft)]"
                   title={
                     engineFlavor === "remote"
-                      ? "원격 백엔드(GCP)에서 생성합니다 — 생성·인페인팅만 지원합니다"
-                      : "로컬 ComfyUI에서 생성합니다 — 모든 기능을 쓸 수 있습니다"
+                      ? "원격 백엔드(GCP Cloud Run)에서 생성합니다"
+                      : "로컬 ComfyUI에서 생성합니다"
                   }
                 >
                   {engineFlavor === "remote" ? "원격 (GCP)" : "로컬"}
                 </span>
               )}
             </div>
-            {engineFlavor === "remote" && (
-              <p className={help}>
-                원격 백엔드는 생성·인페인팅만 지원합니다. 스타일 참조 이미지와 반투명 전용
-                트랙은 로컬 엔진에서만 쓸 수 있습니다.
-              </p>
-            )}
             <div className="mt-1.5 flex flex-wrap gap-2">
               {models.map((option) => (
                 <Chip
@@ -353,7 +349,6 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
             <p className="mt-1.5 text-xs font-medium text-[var(--warn)]">
               반투명 전용 트랙(native alpha)을 쓸 수 없어 trimap으로 처리됩니다 — 유리·반투명
               재질의 알파가 덜 정확할 수 있습니다
-              {engineFlavor === "remote" ? " (로컬 엔진에서는 전용 트랙을 씁니다)" : ""}
             </p>
           )}
         </div>
@@ -364,9 +359,7 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
           </p>
           {refsBlocked ? (
             <p className="mt-1.5 text-xs text-[var(--warn)]">
-              {engineFlavor === "remote"
-                ? "원격 백엔드에서는 참조 이미지를 쓸 수 없습니다 — 로컬 엔진에서 Qwen-Image로 실행하세요"
-                : "선택한 모델은 참조 이미지를 지원하지 않습니다 — Qwen-Image를 선택하세요"}
+              선택한 모델은 참조 이미지를 지원하지 않습니다 — Qwen-Image를 선택하세요
             </p>
           ) : (
             <div className="mt-2 flex items-center gap-3">
