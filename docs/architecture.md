@@ -82,7 +82,7 @@ class WorkflowEngine(Protocol):
 - 모델은 단일 리전 버킷을 GCS FUSE로 `/models`에 읽기 전용 마운트한다. 버킷에 Rapid Cache 3존(asia-southeast1-a/b/c, TTL 24h)이 붙어 있다.
 - **Direct VPC egress(`ALL_TRAFFIC`) + 서브넷 Private Google Access는 필수다.** 빼면 인스턴스 대역폭이 600 Mbps로 묶여 모델 적재가 느려진다.
 - 컨테이너는 nginx Bearer 프록시(`$PORT` → `127.0.0.1:8188`)와 ComfyUI, 자기 종료 와치독으로 구성된다. 와치독 유휴 임계는 540초 — 유휴와 적재가 같은 인스턴스 요율로 과금되므로 손익 분기점이 적재 소요 시간과 같고, Cloud Run이 GPU 인스턴스를 유휴 10분에 회수하므로 9분이 실질 상한이다. Cloud Run에는 유휴 시간을 조절하는 설정이 없어 이 와치독이 유일한 손잡이다.
-- **ComfyUI는 `--disable-dynamic-vram`으로 띄운다.** 기본값인 지연 적재는 가중치 조각마다 GCS 왕복을 만들어 네트워크 파일시스템에서 치명적이다. **`--disable-mmap`은 넣지 않는다 — 같은 마운트에서 TE 읽기가 8배 느려진다.**
+- **ComfyUI는 `--disable-dynamic-vram`으로 띄운다.** 기본값인 지연 적재는 가중치 조각마다 GCS 왕복을 만들어 네트워크 파일시스템에서 치명적이다. **`--disable-mmap`은 넣지 않는다 — 같은 마운트에서 TE 읽기가 16배 느려진다(89 MB/s → 5.2 MB/s).**
 - 성능·비용 현황(qwen / L4 실측): 컨테이너 기동 31초, 모델 적재 약 6분 20초, 잡 1건 8~9분, 잡당 약 $0.24. 와치독 창 안의 두 번째 잡은 적재를 건너뛴다. 시간당 단가는 qwen $1.71 / flux2 $3.82이고, 상시 비용은 버킷·이미지·캐시로 월 $10 안팎이다.
 - ComfyUI나 커스텀 노드 버전을 올린 뒤에는 잡 1건의 구간별 소요를 다시 측정한다 — 적재 관련 기본값이 바뀌면 이 구간이 조용히 되돌아간다.
 - **원격 능력은 프로파일의 `remote.supports_*` 선언이 결정한다.** qwen-image는 생성·인페인팅에 더해 스타일 참조(Edit 2511)·네이티브 알파(Layered)까지 지원한다 — 세 unet 모두 L4에 맞춘 Q6_K 변형으로 버킷에 있고, 잡 종류에 따라 `remote.files` 치환이 해당 매니페스트에 적용된다. flux2-dev는 로컬과 동일하게 styleref·native_alpha가 없다(translucent는 trimap 강등 — 잡은 성공하고 알파 정확도만 떨어진다).

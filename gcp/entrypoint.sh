@@ -243,7 +243,8 @@ cd "$COMFY_HOME"
 # 모델이 네트워크 파일시스템(GCS FUSE) 위에 있어 적재 관련 기본값을 뒤집는다.
 #   --disable-dynamic-vram : 기본 지연 적재는 가중치 조각마다 GCS 왕복을 만든다. --highvram·
 #                            --gpu-only도 끄지만 L4(22.5GB)에 unet+TE 동시 상주로 OOM 위험이 있다.
-#   --disable-mmap은 넣지 말 것 — TE 읽기가 8배 느려진다(mmap 경로가 순차 읽기라 더 빠르다).
+#   --disable-mmap은 넣지 말 것 — TE 읽기가 16배 느려진다(89 MB/s → 5.2 MB/s).
+#                            mmap 경로가 순차 읽기라 마운트의 미리 읽기 최적화를 받는다).
 "$PYTHON_BIN" -u main.py \
     --listen "$COMFY_HOST" \
     --port "$COMFY_PORT" \
