@@ -147,7 +147,8 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
         if (brief.seed === "random") setSeedMode("random");
         else {
           setSeedMode("fixed");
-          setSeedValue(brief.seed);
+          // 서버가 문자열로 내려주므로 숫자 입력란에 넣기 전에 변환한다
+          setSeedValue(Number(brief.seed));
         }
         setNegative(brief.negative ?? "");
         setPosition(brief.placement_hint?.asset_position ?? "auto");

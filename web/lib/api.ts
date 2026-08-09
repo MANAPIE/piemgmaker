@@ -10,7 +10,9 @@ export type BriefInput = {
   size_preset: string | SizeSpec;
   style: { style_packs: string[]; free_text?: string | null };
   candidate_count: number;
-  seed: "random" | number;
+  // 서버는 시드를 문자열로 내려준다 — 64비트라 JS Number로는 하위 자리가 뭉개진다.
+  // 제출할 때는 숫자(고정 시드) 또는 "random"을 보낸다.
+  seed: "random" | number | string;
   placement_hint?: { asset_position: string; composition?: string | null } | null;
   negative?: string | null;
   reference_images?: string[];
@@ -26,7 +28,8 @@ export type QACheck = {
 
 export type Candidate = {
   index: number;
-  seed: number;
+  // 문자열이다 — 위 BriefInput.seed 주석 참고
+  seed: string;
   passed: boolean;
   checks: QACheck[];
   final: string | null;

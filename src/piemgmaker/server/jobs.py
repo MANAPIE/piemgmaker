@@ -30,6 +30,17 @@ log = logging.getLogger(__name__)
 
 PENDING_STATES = {"queued", "preparing", "running", "postprocess"}
 IMAGE_KINDS = ("candidates", "final", "inputs")
+
+
+def _seed_out(seed: object) -> object:
+    """시드를 웹으로 내보낼 때 문자열로 바꾼다.
+
+    시드는 64비트 정수라 JS Number의 안전 범위(2^53-1)를 넘는다. 숫자로 내보내면
+    브라우저가 JSON을 파싱하는 순간 하위 자리가 뭉개져, 서로 다른 후보 시드가
+    화면에서 같은 값으로 보인다. 재현용 값이라 한 자리도 틀리면 안 된다.
+    "random" 같은 문자열 리터럴과 None은 그대로 둔다.
+    """
+    return str(seed) if isinstance(seed, int) and not isinstance(seed, bool) else seed
 ENGINE_STATUS_TTL_S = 3.0
 # 엔진 상태 기본형 — state는 up(도달) / down(도달 불가) / idle(원격 유휴, 프로브 생략) /
 # unknown(큐를 보고하지 않는 엔진). 기존 키는 웹 계약 유지를 위해 그대로 둔다
@@ -281,7 +292,7 @@ class JobStore:
                     "free_text": style.get("free_text"),
                     "style_packs": style.get("style_packs") or [],
                     "model": brief.get("model"),
-                    "seed": brief.get("seed"),
+                    "seed": _seed_out(brief.get("seed")),
                     "candidate_count": brief.get("candidate_count"),
                 }
             )
@@ -310,6 +321,8 @@ class JobStore:
             if brief_path.is_file()
             else None
         )
+        if isinstance(brief_raw, dict) and "seed" in brief_raw:
+            brief_raw = {**brief_raw, "seed": _seed_out(brief_raw["seed"])}
         payload = self._read_json(job_dir / "payload.json") or {}
         qa = self._read_json(job_dir / "qa_report.json") or {}
         candidates = []
@@ -318,7 +331,9 @@ class JobStore:
             candidates.append(
                 {
                     "index": cand["index"],
-                    "seed": cand["seed"],
+                    # 시드는 64비트라 JS Number(2^53)를 넘는다 — 숫자로 내보내면 브라우저에서
+                    # 뭉개져 후보마다 같은 값으로 보인다. 문자열로 내보내 정확도를 지킨다.
+                    "seed": _seed_out(cand["seed"]),
                     "passed": cand.get("passed", False),
                     "checks": cand.get("checks", []),
                     "final": f"final/{name}" if (job_dir / "final" / name).is_file() else None,

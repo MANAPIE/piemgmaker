@@ -80,8 +80,27 @@ def test_rerun은_같은_설정으로_새_잡을_만들고_새_시드_옵션을_
     same_detail = client.get(f"/api/jobs/{same}").json()
     fresh_detail = client.get(f"/api/jobs/{fresh}").json()
     assert same_detail["rerun_of"] == job_id
-    assert same_detail["brief"]["seed"] == 7  # 페이로드 재현용 시드 유지
+    # 시드는 문자열로 내려온다 — 64비트라 JS Number로는 뭉개진다
+    assert same_detail["brief"]["seed"] == "7"  # 페이로드 재현용 시드 유지
     assert fresh_detail["brief"]["seed"] == "random"
+
+
+def test_2의_53승을_넘는_시드도_후보별로_정확히_내려온다(api):
+    """시드를 JSON 숫자로 내보내면 브라우저가 파싱하는 순간 하위 자리가 날아가,
+    서로 다른 후보 시드가 화면에서 같은 값으로 보인다. 재현용 값이라 한 자리도 틀리면 안 된다.
+    """
+    client, store = api
+    big = 3463114480981114003  # 실제 잡에서 나온 값 — JS 안전 정수(2^53-1)의 384배
+    assert big > 2**53 - 1
+
+    job_id = client.post("/api/jobs", json={**BRIEF_BASE, "seed": big}).json()["job_id"]
+    store.process(job_id)
+
+    seeds = [c["seed"] for c in client.get(f"/api/jobs/{job_id}").json()["candidates"]]
+    assert all(isinstance(s, str) for s in seeds)
+    assert seeds == [str(big), str(big + 1)]
+    # float을 거치면 두 값이 같은 수로 붕괴한다 — 그 붕괴를 막는 것이 이 테스트의 목적이다
+    assert float(big) == float(big + 1)
 
 
 def test_히스토리는_검색과_팩_필터를_지원한다(api):
@@ -373,7 +392,7 @@ def test_대기열_항목에는_프롬프트_정보가_포함된다(api):
     assert item["object_concept"] == BRIEF_BASE["object_concept"]
     assert item["style_packs"] == ["test-pack"]
     assert item["free_text"] == "빈티지 무드"
-    assert item["seed"] == 7 and item["candidate_count"] == 2
+    assert item["seed"] == "7" and item["candidate_count"] == 2  # 시드는 문자열
 
 
 def test_queue_스냅샷은_실행중과_대기열을_순번과_함께_보여준다(api):

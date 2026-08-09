@@ -37,7 +37,7 @@ export type QueueJob = {
   free_text?: string | null;
   style_packs?: string[];
   model?: string | null;
-  seed?: number | "random" | null;
+  seed?: number | string | "random" | null;
   candidate_count?: number | null;
   queue_position?: number;
 };
