@@ -17,3 +17,12 @@ matting:
   strategy: segment
   model: BiRefNet-matting
   hash: null
+blend: # 아이소메트릭 — 자산도 같은 각도로 눕혀야 평면 위에 붙는다
+  strength: 0.55
+  relight: 0.5
+  contact_shadow: 0.6
+  drop_shadow: 0.3
+  light_wrap: 0.25
+  grain_match: true
+  geometry:
+    tilt: iso

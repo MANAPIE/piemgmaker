@@ -39,6 +39,7 @@ class RemoteSpec(BaseModel):
     backend_group: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     files: list[RemoteFileOverride] = Field(default_factory=list)
     supports_styleref: bool = False
+    supports_logoref: bool = False  # Edit 계열 공유 스택이지만 선언은 명시적으로 분리한다
     supports_native_alpha: bool = False
 
     @model_validator(mode="after")
@@ -75,6 +76,8 @@ class ModelProfile(BaseModel):
     workflow_gen: str
     workflow_inpaint: str | None = None
     workflow_styleref: str | None = None
+    # 로고를 '내용으로' 재현하는 생성 트랙(원칙 1의 명시적 예외) — Edit 계열 스택 공유
+    workflow_logoref: str | None = None
     supports_negative: bool = True
     sampling: SamplingSpec
     manifest: ModelManifest

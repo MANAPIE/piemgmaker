@@ -1,5 +1,17 @@
 # 자산 라이브러리 v1 — 웹 등록분 포함. 삭제 대신 archived(soft delete).
 assets:
+- id: piemg-wordmark
+  name: PIEmg 워드마크
+  type: logo
+  variants:
+  - id: main
+    file: piemg-wordmark/main.png
+    tags: []
+    archived: false
+  usage:
+    min_scale: 0.1
+    clear_space_px: 16
+  archived: false
 - id: example-badge
   name: 예시 배지
   type: object

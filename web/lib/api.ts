@@ -16,6 +16,10 @@ export type BriefInput = {
   placement_hint?: { asset_position: string; composition?: string | null } | null;
   negative?: string | null;
   reference_images?: string[];
+  // 생성 단계 로고 통합(qwen 전용) — 로고 픽셀 보증 없음. 자산·참조와 동시 사용 불가
+  logo_reference?: string | null;
+  // 자산 합성 모드 오버라이드 — null이면 팩 blend 설정을 따른다
+  asset_blend_mode?: "overlay" | "imprint" | null;
 };
 
 export type QACheck = {
@@ -119,6 +123,7 @@ export type ModelOption = {
   id: string;
   label: string;
   supports_styleref: boolean;
+  supports_logoref: boolean;
   supports_inpaint: boolean;
   supports_native_alpha: boolean;
 };

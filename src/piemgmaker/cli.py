@@ -65,7 +65,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     _print_engine(config)
     packs = load_style_packs(args.packs_dir)
     brief = BriefInput.model_validate(yaml.safe_load(args.brief.read_text(encoding="utf-8")))
-    library = AssetLibrary(args.assets_dir) if brief.assets else None
+    library = AssetLibrary(args.assets_dir) if (brief.assets or brief.logo_reference) else None
     job_id = uuid.uuid4().hex[:12]
     build = build_job(
         brief,

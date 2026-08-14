@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field, field_validator
 MaterialClass = Literal["opaque", "translucent"]
 ShadowPolicy = Literal["none", "soft_floor", "ambient"]
 MattingStrategyId = Literal["segment", "native_alpha", "trimap"]
+TiltPreset = Literal["none", "slight", "iso", "strong"]
+MaskRamp = Literal["linear", "smoothstep"]
+BlendMode = Literal["overlay", "imprint"]
 
 PROMPT_SLOTS = {"subject", "mood"}
 
@@ -54,6 +57,51 @@ class SamplingSpec(BaseModel):
     cfg: float = Field(gt=0)
 
 
+class GeometrySpec(BaseModel):
+    """자산 기하 변환 — 팩이 각도를 소유한다 (잡별 오버라이드는 범위 밖)."""
+
+    rotation_deg: float = Field(default=0.0, ge=-180, le=180)
+    tilt: TiltPreset = "none"
+
+
+class GenerativeBlendSpec(BaseModel):
+    """인페인팅 마스크의 재통합 강도 — core_noise 0이면 코어를 완전 보호한다."""
+
+    core_noise: int = Field(default=0, ge=0, le=128)
+    band_px: int = Field(default=8, ge=1, le=64)
+    ramp: MaskRamp = "linear"
+
+
+class FidelitySpec(BaseModel):
+    """하모나이즈 후 자산 편차 상한 — 초과 시 해당 후보만 force 합성으로 강등."""
+
+    shape_iou_min: float = Field(default=0.98, ge=0, le=1)
+    mean_delta_e_max: float = Field(default=12.0, gt=0)
+    hue_shift_max_deg: float = Field(default=8.0, gt=0)
+
+
+class BlendSpec(BaseModel):
+    """자산 하모나이즈 강도 — 블록이 없으면(None) force 합성(코어 픽셀 보존).
+
+    mode="imprint"는 장면 질감·음영이 로고를 관통하는 '새김'이라 색차가 설계상
+    커진다 — imprint 팩은 fidelity.mean_delta_e_max를 함께 올려야 한다.
+    """
+
+    strength: float = Field(default=0.6, ge=0, le=1)
+    mode: BlendMode = "overlay"
+    relight: float = Field(default=0.5, ge=0, le=1)
+    contact_shadow: float = Field(default=0.6, ge=0, le=1)
+    drop_shadow: float = Field(default=0.35, ge=0, le=1)
+    light_wrap: float = Field(default=0.3, ge=0, le=1)
+    grain_match: bool = True
+    imprint_texture: float = Field(default=0.85, ge=0, le=1)
+    imprint_emboss: float = Field(default=0.5, ge=0, le=1)
+    ink_opacity: float = Field(default=0.9, ge=0.5, le=1)
+    geometry: GeometrySpec = Field(default_factory=GeometrySpec)
+    generative: GenerativeBlendSpec = Field(default_factory=GenerativeBlendSpec)
+    fidelity: FidelitySpec = Field(default_factory=FidelitySpec)
+
+
 class StylePack(BaseModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     version: str
@@ -69,6 +117,7 @@ class StylePack(BaseModel):
     model_manifest: ModelManifest
     matting: MattingSpec
     sampling: SamplingSpec | None = None
+    blend: BlendSpec | None = None
     judge_criteria: JudgeCriteria | None = None
 
     @field_validator("prompt_template")

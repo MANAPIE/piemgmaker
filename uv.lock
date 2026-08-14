@@ -278,6 +278,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "scikit-image" },
+    { name = "scipy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -297,6 +298,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "scikit-image", specifier = ">=0.24" },
+    { name = "scipy", specifier = ">=1.11" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
 ]
 

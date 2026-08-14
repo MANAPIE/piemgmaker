@@ -19,6 +19,7 @@ SIZE_MAX = 2048
 SIZE_MULTIPLE = 8
 
 ASSET_REF_PATTERN = r"^[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?$"
+ASSET_REF_MAX_LEN = 128  # 패턴은 길이를 제한하지 않으므로 저장 바이트 상한을 별도로 둔다
 
 
 class SizeSpec(BaseModel):
@@ -63,14 +64,29 @@ class BriefInput(BaseModel):
     placement_hint: PlacementHint | None = None
     negative: str | None = Field(default=None, max_length=500)
     reference_images: list[str] = Field(default_factory=list, max_length=2)
+    # 생성 단계 로고 통합(Edit 계열) — 로고를 참조 '내용'으로 재현한다.
+    # 합성 경로(assets)와 달리 픽셀·코어 보증이 없다 (원칙 1의 명시적 예외 트랙).
+    logo_reference: str | None = None
+    # 자산 합성 모드 오버라이드 — None이면 팩 blend 설정을 따른다.
+    # overlay=조명·그림자 정합, imprint=표면 새김(질감 투과)
+    asset_blend_mode: Literal["overlay", "imprint"] | None = None
 
     @field_validator("assets")
     @classmethod
     def _check_asset_refs(cls, refs: list[str]) -> list[str]:
         for ref in refs:
-            if not re.fullmatch(ASSET_REF_PATTERN, ref):
-                raise ValueError(f"자산 참조 형식 오류(asset-id[:variant-id]): {ref!r}")
+            if len(ref) > ASSET_REF_MAX_LEN or not re.fullmatch(ASSET_REF_PATTERN, ref):
+                raise ValueError(f"자산 참조 형식 오류(asset-id[:variant-id]): {ref[:64]!r}")
         return refs
+
+    @field_validator("logo_reference")
+    @classmethod
+    def _check_logo_ref(cls, ref: str | None) -> str | None:
+        if ref is not None and (
+            len(ref) > ASSET_REF_MAX_LEN or not re.fullmatch(ASSET_REF_PATTERN, ref)
+        ):
+            raise ValueError(f"로고 참조 형식 오류(asset-id[:variant-id]): {ref[:64]!r}")
+        return ref
 
     @field_validator("size_preset")
     @classmethod

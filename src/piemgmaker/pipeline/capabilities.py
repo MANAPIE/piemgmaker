@@ -16,26 +16,30 @@ class ModelCapability:
 
     model_id: str
     supports_styleref: bool
+    supports_logoref: bool
     supports_inpaint: bool
     supports_native_alpha: bool
 
 
 def model_capability(profile: ModelProfile, engine_flavor: EngineFlavor) -> ModelCapability:
-    # 원격은 생성·인페인팅만 지원한다. 스타일 참조(Edit 계열)와 네이티브 알파(Layered 계열)는
+    # 원격은 생성·인페인팅만 지원한다. 스타일·로고 참조(Edit 계열)와 네이티브 알파(Layered 계열)는
     # remote 블록이 명시적으로 허용해야 쓸 수 있고, 블록이 없으면 원격 실행 자체가 불가능하다.
     if engine_flavor == "remote" and profile.remote is None:
-        return ModelCapability(profile.id, False, False, False)
+        return ModelCapability(profile.id, False, False, False, False)
 
     remote = profile.remote if engine_flavor == "remote" else None
     styleref = bool(profile.workflow_styleref)
+    logoref = bool(profile.workflow_logoref)
     native_alpha = profile.native_alpha is not None
     if remote is not None:
         styleref = styleref and remote.supports_styleref
+        logoref = logoref and remote.supports_logoref
         native_alpha = native_alpha and remote.supports_native_alpha
 
     return ModelCapability(
         model_id=profile.id,
         supports_styleref=styleref,
+        supports_logoref=logoref,
         supports_inpaint=bool(profile.workflow_inpaint),
         supports_native_alpha=native_alpha,
     )

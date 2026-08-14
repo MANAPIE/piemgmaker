@@ -18,3 +18,10 @@ matting:
   strategy: native_alpha
   model: BiRefNet-matting
   hash: null
+blend: # 유리 — 배경 비침(라이트랩) 위주, 매끈한 재질이라 그레인 끔
+  strength: 0.45
+  relight: 0.4
+  contact_shadow: 0.45
+  drop_shadow: 0.2
+  light_wrap: 0.5
+  grain_match: false
