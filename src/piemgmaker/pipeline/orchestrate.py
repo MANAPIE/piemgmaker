@@ -8,6 +8,7 @@
   동일 결과가 나와 무의미하기 때문이다.
 """
 
+import hashlib
 import secrets
 import time
 import uuid
@@ -36,11 +37,14 @@ from piemgmaker.pipeline.matting_router import (
     MattingNodeRegistry,
     chain_for,
 )
+from piemgmaker.pipeline.harmonize import HarmonizeSpec, harmonize
 from piemgmaker.pipeline.paste_back import (
     PlacementOutOfBounds,
     make_inpaint_mask,
+    measure_asset_fidelity,
     paste_back,
     scale_asset,
+    transform_asset,
     verify_core_hash,
 )
 from piemgmaker.pipeline.postprocess import (
@@ -50,7 +54,13 @@ from piemgmaker.pipeline.postprocess import (
     estimate_bg_color,
     postprocess,
 )
-from piemgmaker.pipeline.qa import RULE_CORE_HASH, RULE_FOREGROUND, QAThresholds, run_qa
+from piemgmaker.pipeline.qa import (
+    RULE_ASSET_FIDELITY,
+    RULE_CORE_HASH,
+    RULE_FOREGROUND,
+    QAThresholds,
+    run_qa,
+)
 from piemgmaker.schemas.brief import BriefInput, SizeSpec
 from piemgmaker.schemas.model_profile import ModelProfileRegistry
 from piemgmaker.schemas.generation import (
@@ -63,10 +73,13 @@ from piemgmaker.schemas.generation import (
 )
 from piemgmaker.schemas.qa import CandidateQA, QACheck, QAReport
 from piemgmaker.schemas.style_pack import (
+    BlendSpec,
+    GeometrySpec,
     MaterialClass,
     MattingStrategyId,
     ModelManifest,
     SamplingSpec,
+    ShadowPolicy,
     StylePack,
 )
 from piemgmaker.workflows.render import (
@@ -93,6 +106,24 @@ SHADOW_PROMPTS = {
 OPAQUE_BG_PROMPT = "isolated on a plain solid neutral gray background"
 TRANSLUCENT_BG_PROMPT = "isolated single object, clean transparent background"
 STYLEREF_PROMPT = "render in the visual style of the reference image, do not copy its content"
+# logoref: styleref와 반대로 참조를 '내용으로' 재현한다 — 로고 충실 재현 지시
+LOGOREF_PROMPT = (
+    "the exact logo from the reference image appears on the object surfaces, "
+    "reproduce the reference logo faithfully with identical lettering and colors, "
+    "integrated into each surface with matching lighting and perspective"
+)
+# blend 활성 인페인트 경로 — 선배치 자산 주변을 모델이 통합적으로 그리게 유도
+ASSET_BLEND_PROMPT = (
+    "the pre-placed graphic sits naturally on the object with matched lighting "
+    "and a soft contact shadow, not a flat sticker"
+)
+
+# shadow_policy → (접지, 드롭) 배율 — 팩에 이미 있는 개념을 재사용해 새 개념을 늘리지 않는다
+SHADOW_POLICY_BLEND_FACTORS: dict[ShadowPolicy, tuple[float, float]] = {
+    "none": (0.0, 0.0),
+    "soft_floor": (1.0, 1.0),
+    "ambient": (1.0, 0.0),
+}
 
 RETRY_SEED_OFFSET = 1_000_003
 ASSET_ROW_GAP_PX = 16  # 다중 자산 가로 일렬 배치 간격(px)
@@ -125,6 +156,8 @@ def build_prompts(
     packs: list[StylePack],
     material: MaterialClass,
     has_reference: bool = False,
+    asset_blend: bool = False,
+    logo_ref: bool = False,
 ) -> Prompts:
     """{subject}=object_concept, {mood}=style.free_text.
 
@@ -144,6 +177,10 @@ def build_prompts(
             parts.append(mood)
     if has_reference:
         parts.append(STYLEREF_PROMPT)
+    if logo_ref:
+        parts.append(LOGOREF_PROMPT)
+    if asset_blend:
+        parts.append(ASSET_BLEND_PROMPT)
     parts.append(OPAQUE_BG_PROMPT if material == "opaque" else TRANSLUCENT_BG_PROMPT)
     negatives = [p.negative for p in packs if p.negative]
     if brief.negative:
@@ -176,57 +213,74 @@ def _fit_scale(scale: float, min_scale: float, asset_id: str) -> float:
 
 
 def _prepare_asset_layers(
-    brief: BriefInput, library: AssetLibrary, canvas: SizeSpec
+    brief: BriefInput,
+    library: AssetLibrary,
+    canvas: SizeSpec,
+    geometry: GeometrySpec | None = None,
 ) -> list[AssetLayer]:
+    geometry = geometry or GeometrySpec()
     entries = []
     for ref in brief.assets:
         asset, variant, path = library.resolve(ref)
-        entries.append((asset, variant, path, Image.open(path).convert("RGBA")))
+        img = Image.open(path).convert("RGBA")
+        # 기하 변환은 스케일 1로 먼저 — 회전·원근이 bbox를 키우므로 맞춤 스케일은
+        # 변환 후 크기 기준으로 재산출해야 캔버스 이탈이 없다
+        rgba, quad = transform_asset(img, 1.0, geometry.rotation_deg, geometry.tilt)
+        entries.append((asset, variant, path, rgba, quad))
 
     pos = brief.placement_hint.asset_position if brief.placement_hint else "auto"
     layers: list[AssetLayer] = []
 
     if len(entries) == 1:
-        asset, variant, path, img = entries[0]
+        asset, variant, path, base, quad = entries[0]
         clear = asset.usage.clear_space_px
         avail_w, avail_h = canvas.width - 2 * clear, canvas.height - 2 * clear
         if avail_w <= 0 or avail_h <= 0:
             raise OrchestrationError(f"clear_space({clear}px)가 캔버스보다 큽니다")
+        bh, bw = base.shape[:2]
         scale = _fit_scale(
-            min(1.0, avail_w / img.width, avail_h / img.height), asset.usage.min_scale, asset.id
+            min(1.0, avail_w / bw, avail_h / bh), asset.usage.min_scale, asset.id
         )
-        rgba = scale_asset(img, scale)
+        rgba = scale_asset(Image.fromarray(base, "RGBA"), scale)
         h, w = rgba.shape[:2]
         x, y = _position_xy(pos, canvas.width, canvas.height, w, h, clear)
-        layers.append(_layer(asset.id, variant.id, path, rgba, x, y, scale))
+        layers.append(_layer(asset.id, variant.id, path, rgba, x, y, scale, geometry, quad))
         return layers
 
     # 다중 자산: 가로 일렬 중앙 배치, 균일 스케일 (placement_hint는 무시)
-    clear = max(a.usage.clear_space_px for a, _, _, _ in entries)
+    clear = max(a.usage.clear_space_px for a, _, _, _, _ in entries)
     gap = max(ASSET_ROW_GAP_PX, clear)
-    total_w = sum(img.width for _, _, _, img in entries) + gap * (len(entries) - 1)
-    max_h = max(img.height for _, _, _, img in entries)
+    total_w = sum(r.shape[1] for _, _, _, r, _ in entries) + gap * (len(entries) - 1)
+    max_h = max(r.shape[0] for _, _, _, r, _ in entries)
     scale = min(
         1.0, (canvas.width - 2 * clear) / total_w, (canvas.height - 2 * clear) / max_h
     )
-    for asset, _, _, _ in entries:
+    for asset, _, _, _, _ in entries:
         _fit_scale(scale, asset.usage.min_scale, asset.id)
     scaled = [
-        (asset, variant, path, scale_asset(img, scale))
-        for asset, variant, path, img in entries
+        (asset, variant, path, scale_asset(Image.fromarray(base, "RGBA"), scale), quad)
+        for asset, variant, path, base, quad in entries
     ]
-    row_w = sum(r.shape[1] for _, _, _, r in scaled) + round(gap * scale) * (len(scaled) - 1)
+    row_w = sum(r.shape[1] for _, _, _, r, _ in scaled) + round(gap * scale) * (len(scaled) - 1)
     cursor = (canvas.width - row_w) // 2
-    for asset, variant, path, rgba in scaled:
+    for asset, variant, path, rgba, quad in scaled:
         h, w = rgba.shape[:2]
         y = (canvas.height - h) // 2
-        layers.append(_layer(asset.id, variant.id, path, rgba, cursor, y, scale))
+        layers.append(_layer(asset.id, variant.id, path, rgba, cursor, y, scale, geometry, quad))
         cursor += w + round(gap * scale)
     return layers
 
 
 def _layer(
-    asset_id: str, variant_id: str, path: Path, rgba: np.ndarray, x: int, y: int, scale: float
+    asset_id: str,
+    variant_id: str,
+    path: Path,
+    rgba: np.ndarray,
+    x: int,
+    y: int,
+    scale: float,
+    geometry: GeometrySpec,
+    quad: tuple | None,
 ) -> AssetLayer:
     return AssetLayer(
         resolved=ResolvedAsset(
@@ -234,22 +288,39 @@ def _layer(
             variant_id=variant_id,
             file=str(path),
             file_sha256=file_sha256(path),
-            placement=Placement(x=x, y=y, scale=scale),
+            placement=Placement(
+                x=x,
+                y=y,
+                scale=scale,
+                rotation_deg=geometry.rotation_deg,
+                perspective=quad,
+            ),
         ),
         rgba=rgba,
     )
 
 
 def _build_inpaint_inputs(
-    size: SizeSpec, layers: list[AssetLayer]
+    size: SizeSpec, layers: list[AssetLayer], blend: BlendSpec | None = None
 ) -> tuple[Image.Image, Image.Image]:
-    """선배치 캔버스(RGB) + 2단 마스크(L). 다중 자산은 마스크 최솟값 병합(모든 코어 보호)."""
+    """선배치 캔버스(RGB) + 마스크(L). 다중 자산은 마스크 최솟값 병합(모든 코어 보호).
+
+    blend.generative가 코어 개방(core_noise)·밴드 폭·램프 곡선을 결정한다 —
+    core_noise 0이면 코어가 완전 보호된다(2단 마스크).
+    """
+    gen = blend.generative if blend is not None else None
+    # 기본값은 make_inpaint_mask 서명 한 곳만 소유한다 — gen 없으면 인자를 넘기지 않는다
+    mask_kwargs = (
+        {"band_px": gen.band_px, "core_value": gen.core_noise, "ramp": gen.ramp} if gen else {}
+    )
     canvas = Image.new("RGBA", (size.width, size.height), (*FORCED_BG_COLOR, 255))
     mask_total = np.full((size.height, size.width), 255, dtype=np.uint8)
     for layer in layers:
         canvas = paste_back(canvas, layer.rgba, layer.resolved.placement)
         mask = np.asarray(
-            make_inpaint_mask((size.width, size.height), layer.rgba, layer.resolved.placement)
+            make_inpaint_mask(
+                (size.width, size.height), layer.rgba, layer.resolved.placement, **mask_kwargs
+            )
         )
         mask_total = np.minimum(mask_total, mask)
     return canvas.convert("RGB"), Image.fromarray(mask_total, "L")
@@ -283,6 +354,7 @@ class BuildResult:
     input_images: dict[str, str] = field(default_factory=dict)
     skip_matting: bool = False
     backend_group: str | None = None  # 원격 실행에서 잡을 받을 모델 계열 서비스
+    blend: BlendSpec | None = None  # 자산 하모나이즈 강도 — None이면 force 합성(코어 보존)
 
     def _variant_for(self, strategy: MattingStrategyId | None) -> GraphVariant:
         needs_fragment = strategy is not None and STRATEGY_FRAGMENTS[strategy] is not None
@@ -339,6 +411,7 @@ class BuildResult:
             input_images=self.input_images,
             output_index=output_index,
             backend_group=self.backend_group,
+            logo_reference=self.brief.logo_reference,
         )
 
 
@@ -364,9 +437,30 @@ def build_job(
         raise OrchestrationError("스타일 팩이 최소 1개 필요합니다")
     primary = packs[0] if packs else None
     material = primary.material_class if primary else "opaque"
+    blend = primary.blend if primary else None
+    if brief.asset_blend_mode is not None:
+        # 브리프 오버라이드 — 팩에 blend 블록이 없어도 기본값으로 모드를 활성화한다
+        base_blend = blend or BlendSpec()
+        updates: dict[str, object] = {"mode": brief.asset_blend_mode}
+        if brief.asset_blend_mode == "imprint":
+            # imprint는 질감 투과가 목적이라 색차가 설계상 크다 — 사용자가 명시적으로
+            # 새김을 골랐으므로 ΔE 상한을 새김 기준으로 보정한다 (팩이 더 크게 잡았으면 유지)
+            updates["fidelity"] = base_blend.fidelity.model_copy(
+                update={"mean_delta_e_max": max(base_blend.fidelity.mean_delta_e_max, 30.0)}
+            )
+        blend = base_blend.model_copy(update=updates)
+    blend_active = blend is not None and blend.strength > 0
     size = brief.size()
     refs = list(brief.reference_images)
-    prompts = build_prompts(brief, packs, material, has_reference=bool(refs))
+    logo_ref = brief.logo_reference
+    prompts = build_prompts(
+        brief,
+        packs,
+        material,
+        has_reference=bool(refs),
+        asset_blend=bool(brief.assets) and blend_active,
+        logo_ref=bool(logo_ref),
+    )
     chain = chain_for(material)
 
     # ── 워크플로우·모델 결정: 프로파일(사용자 모델 선택) 우선, 없으면 팩 레거시 폴백 ──
@@ -403,8 +497,25 @@ def build_job(
     if profile:
         if brief.assets and refs:
             raise OrchestrationError("자산 인페인트와 참조 이미지 동시 사용은 아직 지원하지 않습니다 (v1)")
+        if logo_ref and (brief.assets or refs):
+            raise OrchestrationError("로고 참조는 자산 합성·스타일 참조와 동시 사용을 지원하지 않습니다 (v1)")
         sampling = (primary.sampling if primary else None) or profile.sampling
-        if refs:
+        if logo_ref:
+            if material == "translucent":
+                raise OrchestrationError("로고 참조는 translucent 팩과 동시 사용을 지원하지 않습니다 (v1)")
+            if capability is not None and not capability.supports_logoref:
+                if not profile.workflow_logoref:
+                    raise OrchestrationError(
+                        f"{profile.id!r} 프로파일은 로고 참조 생성을 지원하지 않습니다 — qwen-image를 사용하세요"
+                    )
+                raise OrchestrationError(
+                    f"{profile.id!r} 프로파일의 원격 백엔드는 로고 참조 생성을 지원하지 않습니다 "
+                    "— 로컬 엔진(PM_ENGINE 미설정)으로 실행하세요"
+                )
+            workflow_id = profile.workflow_logoref
+            # styleref와 같은 Edit 스택을 공유한다
+            manifest = profile.styleref_manifest or profile.manifest
+        elif refs:
             if material == "translucent":
                 raise OrchestrationError("참조 이미지는 translucent 팩과 동시 사용을 지원하지 않습니다 (v1)")
             # 판정은 capability 하나로 하고, 분기는 사용자에게 보일 문구를 고르는 데만 쓴다.
@@ -437,6 +548,8 @@ def build_job(
     else:
         if refs:
             raise OrchestrationError("참조 이미지 경로는 모델 프로파일 레지스트리가 필요합니다")
+        if logo_ref:
+            raise OrchestrationError("로고 참조 경로는 모델 프로파일 레지스트리가 필요합니다")
         sampling = primary.sampling
         manifest = primary.model_manifest
         if brief.assets:
@@ -467,8 +580,10 @@ def build_job(
             raise OrchestrationError("자산 참조가 있는데 자산 라이브러리가 없습니다")
         if workdir is None:
             raise OrchestrationError("자산 경로에는 workdir가 필요합니다 (선배치 캔버스·마스크 저장)")
-        assets = _prepare_asset_layers(brief, library, size)
-        canvas_img, mask_img = _build_inpaint_inputs(size, assets)
+        assets = _prepare_asset_layers(
+            brief, library, size, geometry=blend.geometry if blend else None
+        )
+        canvas_img, mask_img = _build_inpaint_inputs(size, assets, blend=blend)
         workdir.mkdir(parents=True, exist_ok=True)
         canvas_img.save(workdir / "canvas.png")
         mask_img.save(workdir / "mask.png")
@@ -487,6 +602,19 @@ def build_job(
             copy_path = workdir / f"ref{index}.png"
             Image.open(source).convert("RGB").save(copy_path)
             input_images[f"ref{index}"] = str(copy_path)
+    if logo_ref:
+        if library is None:
+            raise OrchestrationError("로고 참조가 있는데 자산 라이브러리가 없습니다")
+        if workdir is None:
+            raise OrchestrationError("로고 참조 경로에는 workdir가 필요합니다 (참조 사본 저장)")
+        _, _, logo_path = library.resolve(logo_ref)
+        workdir.mkdir(parents=True, exist_ok=True)
+        # Edit 모델 입력은 RGB — 알파 로고는 흰 배경에 합성해 넘긴다
+        logo_rgba = Image.open(logo_path).convert("RGBA")
+        white = Image.new("RGBA", logo_rgba.size, (255, 255, 255, 255))
+        copy_path = workdir / "logoref.png"
+        Image.alpha_composite(white, logo_rgba).convert("RGB").save(copy_path)
+        input_images["ref1"] = str(copy_path)
 
     primary_variant = _make_variant(workflow_id, manifest, sampling, prompts, size, job_id)
     if refs and len(refs) >= 2:
@@ -515,6 +643,7 @@ def build_job(
         input_images=input_images,
         skip_matting=skip_matting,
         backend_group=remote.backend_group if remote else None,
+        blend=blend,
     )
 
 
@@ -624,6 +753,69 @@ def _run_engine(
     return engine.fetch(handle, dest)
 
 
+def _harmonize_spec(
+    blend: BlendSpec, shadow_policy: ShadowPolicy, seed: int, asset_id: str
+) -> HarmonizeSpec:
+    """팩 강도 × 그림자 정책 배율 → 후보별 하모나이즈 스펙.
+
+    그레인 시드는 후보 시드 ⊕ asset_id 해시 — payload의 seeds·assets에서 재현 가능하다.
+    """
+    contact_factor, drop_factor = SHADOW_POLICY_BLEND_FACTORS[shadow_policy]
+    digest = int.from_bytes(hashlib.sha256(asset_id.encode()).digest()[:8], "big")
+    return HarmonizeSpec(
+        strength=blend.strength,
+        mode=blend.mode,
+        relight=blend.relight,
+        contact_shadow=blend.contact_shadow * contact_factor,
+        drop_shadow=blend.drop_shadow * drop_factor,
+        light_wrap=blend.light_wrap,
+        grain_match=blend.grain_match,
+        noise_seed=(seed ^ digest) % SEED_SPACE,
+        imprint_texture=blend.imprint_texture,
+        imprint_emboss=blend.imprint_emboss,
+        ink_opacity=blend.ink_opacity,
+    )
+
+
+def _paste_layer_blend(
+    final: Image.Image,
+    layer: AssetLayer,
+    adjusted: Placement,
+    blend: BlendSpec,
+    shadow_policy: ShadowPolicy,
+    seed: int,
+) -> tuple[Image.Image, QACheck]:
+    """하모나이즈 → blend 합성 → 편차 검증. 상한 초과 시 해당 층만 force로 강등한다.
+
+    harmonize는 scene(그림자)과 asset(리라이트·질감)을 따로 돌려주고 합성하지 않으므로,
+    강등 시 그림자가 반영된 scene에 원본 자산을 다시 합성하면 이중 합성이 없다.
+    """
+    spec = _harmonize_spec(blend, shadow_policy, seed, layer.resolved.asset_id)
+    scene_shadowed, harmonized, _report = harmonize(final, layer.rgba, adjusted, spec)
+    blended = paste_back(scene_shadowed, harmonized, adjusted, core_policy="blend")
+    fidelity = measure_asset_fidelity(blended, harmonized, layer.rgba, adjusted, blend.fidelity)
+    label = f"{layer.resolved.asset_id}:{layer.resolved.variant_id}"
+    detail = (
+        f"{label} ΔE={fidelity.mean_delta_e} IoU={fidelity.shape_iou} "
+        f"hue={fidelity.hue_shift_deg}°"
+    )
+    if fidelity.passed:
+        return blended, QACheck(
+            rule=RULE_ASSET_FIDELITY,
+            passed=True,
+            measured=fidelity.mean_delta_e,
+            detail=detail,
+        )
+    # 강등 결과는 브랜드 정확(force)이므로 실패가 아니다 — detail로 강등 사실만 남긴다
+    forced = paste_back(scene_shadowed, layer.rgba, adjusted)
+    return forced, QACheck(
+        rule=RULE_ASSET_FIDELITY,
+        passed=True,
+        measured=fidelity.mean_delta_e,
+        detail=f"{detail} — 편차 상한 초과로 원본 강제 합성(force) 강등",
+    )
+
+
 def _process_candidate(
     result: CandidateResult,
     build: BuildResult,
@@ -660,16 +852,31 @@ def _process_candidate(
     final_path: Path | None = None
     if final is not None:
         dx, dy = offset
+        blend = build.blend
+        blend_active = blend is not None and blend.strength > 0
+        shadow_policy: ShadowPolicy = build.packs[0].shadow_policy if build.packs else "none"
         for layer in build.assets:
             base = layer.resolved.placement
             try:
-                adjusted = Placement(x=base.x + dx, y=base.y + dy, scale=base.scale)
+                adjusted = Placement(
+                    x=base.x + dx,
+                    y=base.y + dy,
+                    scale=base.scale,
+                    rotation_deg=base.rotation_deg,
+                    perspective=base.perspective,
+                )
+                if blend_active:
+                    final, check = _paste_layer_blend(
+                        final, layer, adjusted, blend, shadow_policy, result.seed
+                    )
+                    checks.append(check)
+                    continue
                 final = paste_back(final, layer.rgba, adjusted)
                 ok = verify_core_hash(final, layer.rgba, adjusted)
             except (PlacementOutOfBounds, ValidationError) as exc:
                 checks.append(
                     QACheck(
-                        rule=RULE_CORE_HASH,
+                        rule=RULE_ASSET_FIDELITY if blend_active else RULE_CORE_HASH,
                         passed=False,
                         detail=f"{layer.resolved.asset_id}: 배치 보정 실패 — {exc}",
                         regen_hint="자산 배치가 크롭 결과를 벗어났습니다 — 재생성하세요",
@@ -711,7 +918,13 @@ def _foreground_missing(outcome: CandidateOutcome) -> bool:
 
 
 def _hash_failed(outcome: CandidateOutcome) -> bool:
-    return any(c.rule == RULE_CORE_HASH and not c.passed for c in outcome.qa.checks)
+    # blend 경로의 배치 실패(RULE_ASSET_FIDELITY passed=False)도 파생 시드 재시도 대상이다
+    # — 새 시드는 크롭 오프셋을 바꿔 배치가 다시 맞을 수 있다. 편차 초과 강등은
+    # passed=True로 기록되므로 여기 걸리지 않는다(GPU 재시도 없음).
+    return any(
+        c.rule in (RULE_CORE_HASH, RULE_ASSET_FIDELITY) and not c.passed
+        for c in outcome.qa.checks
+    )
 
 
 def execute_job(

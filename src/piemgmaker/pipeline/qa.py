@@ -18,6 +18,7 @@ RULE_EDGE_CONTACT = "edge-contact"
 RULE_COVERAGE = "coverage"
 RULE_HALO = "halo"
 RULE_CORE_HASH = "core-hash"  # 오케스트레이터가 paste-back 검증 결과를 이 룰로 기록
+RULE_ASSET_FIDELITY = "asset-fidelity"  # blend 정책의 편차 상한 판정 (하모나이즈 경로)
 RULE_FOREGROUND = "foreground-detected"  # 전경 미검출(후처리 실패)도 QA 리포트에 기록
 
 

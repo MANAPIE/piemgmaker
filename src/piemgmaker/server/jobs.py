@@ -157,7 +157,9 @@ class JobStore:
             build = build_job(
                 brief,
                 self.packs,
-                library=AssetLibrary(self.assets_dir) if brief.assets else None,
+                library=AssetLibrary(self.assets_dir)
+                if (brief.assets or brief.logo_reference)
+                else None,
                 profiles=self.profiles,
                 job_id=job_id,
                 workdir=job_dir / "inputs",

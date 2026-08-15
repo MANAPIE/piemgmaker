@@ -17,3 +17,10 @@ matting:
   strategy: segment
   model: BiRefNet-matting
   hash: null
+blend: # 페이퍼크래프트 — 종이 레이어 특유의 또렷한 드롭 섀도
+  strength: 0.6
+  relight: 0.55
+  contact_shadow: 0.7
+  drop_shadow: 0.45
+  light_wrap: 0.25
+  grain_match: true

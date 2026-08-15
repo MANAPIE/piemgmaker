@@ -10,6 +10,8 @@ const PATH_LABEL: Record<string, string> = {
   trimap: "트라이맵 매팅",
   native_alpha: "네이티브 알파",
   styleref: "참조 이미지",
+  logoref: "로고 참조 생성",
+  imprint: "표면 새김 합성",
 };
 
 const OPEN_KEY = "pm-sample-gallery-open";
@@ -38,7 +40,8 @@ export default function SampleGallery() {
     });
   }
 
-  const packName = (id: string) => packNames[id] ?? id;
+  // 팩 없이 만든 샘플(포토리얼 free_text 등)은 pack이 빈 문자열이다
+  const packName = (id: string) => (id ? packNames[id] ?? id : "팩 없음");
   const models = useMemo(() => [...new Set(samples.map((s) => s.model_label))], [samples]);
   const packs = useMemo(() => [...new Set(samples.map((s) => s.pack))], [samples]);
   const visible = samples.filter(

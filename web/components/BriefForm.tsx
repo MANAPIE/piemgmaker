@@ -1,8 +1,9 @@
 "use client";
 
-// object_concept("AI가 그릴 요소")와 assets("원본 그대로 삽입될 자산")의
-// 라벨·설명 분리를 강제한다. 모델 선택·참조 이미지(최대 2장)·자산 선택은 서로의 제약을
-// 폼에서 안내하고, 최종 검증은 서버 스키마가 담당한다.
+// object_concept("AI가 그릴 요소")와 assets("라이브러리 자산 합성")의
+// 라벨·설명 분리를 강제한다. 자산 픽셀 보존 수준은 합성 모드(팩 기본/overlay/imprint)가
+// 결정하며, 로고 참조 생성(logoref)은 생성 트랙이라 보존이 없다. 모델 선택·참조
+// 이미지·자산·로고 참조는 서로의 제약을 폼에서 안내하고, 최종 검증은 서버 스키마가 담당한다.
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -101,6 +102,9 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
   const [negative, setNegative] = useState("");
   const [position, setPosition] = useState("auto");
   const [composition, setComposition] = useState("");
+  // "pack" = 팩 blend 설정 그대로 (오버라이드 안 함)
+  const [blendMode, setBlendMode] = useState<"pack" | "overlay" | "imprint">("pack");
+  const [logoRef, setLogoRef] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -153,6 +157,8 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
         setNegative(brief.negative ?? "");
         setPosition(brief.placement_hint?.asset_position ?? "auto");
         setComposition(brief.placement_hint?.composition ?? "");
+        setLogoRef(brief.logo_reference ?? "");
+        setBlendMode(brief.asset_blend_mode ?? "pack");
       })
       .catch((e: Error) => setError(e.message));
   }, [fromJobId]);
@@ -160,7 +166,10 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
   const currentModel = useMemo(() => models.find((m) => m.id === model), [models, model]);
   const consistencyWarning = selectedPacks.length > 1 || freeText.trim() !== "";
   const refsBlocked = currentModel ? !currentModel.supports_styleref : false;
+  const logorefBlocked = currentModel ? !currentModel.supports_logoref : false;
   const conflict = selectedAssets.length > 0 && refs.length > 0;
+  // 로고 참조(생성 트랙)는 자산 합성·스타일 참조와 동시 사용 불가 (v1 서버 제약)
+  const logoConflict = logoRef !== "" && (selectedAssets.length > 0 || refs.length > 0);
 
   // 트랙을 못 쓰면 trimap으로 강등되지만 잡은 성공한다 — 차단하지 않고 품질 저하만 알린다.
   const translucentDowngrade =
@@ -211,6 +220,8 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
           : null,
       negative: negative.trim() || null,
       reference_images: refs,
+      logo_reference: logoRef || null,
+      asset_blend_mode: blendMode === "pack" ? null : blendMode,
     };
     try {
       const { job_id } = await postJson<{ job_id: string }>("jobs", brief);
@@ -291,10 +302,13 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {packs.map((pack) => {
               const active = selectedPacks.includes(pack.id);
+              // 팩 썸네일은 로고 없는 순수 스타일 산출물만 — 참조·로고 트랙 샘플은 제외
+              const isStyleSample = (s: SampleInfo) =>
+                !["styleref", "logoref", "imprint"].includes(s.path);
               const thumb =
                 samples.find(
-                  (s) => s.pack === pack.id && s.model === model && s.path !== "styleref",
-                ) ?? samples.find((s) => s.pack === pack.id && s.path !== "styleref");
+                  (s) => s.pack === pack.id && s.model === model && isStyleSample(s),
+                ) ?? samples.find((s) => s.pack === pack.id && isStyleSample(s));
               return (
                 <button
                   type="button"
@@ -405,10 +419,12 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
         </div>
       </Section>
 
-      <Section title="원본 그대로 삽입될 자산">
+      <Section title="라이브러리 자산 합성">
         <p className={`${help} -mt-2`}>
-          로고·오브젝트 자산은 <b>생성되지 않고 원본 그대로 합성</b>됩니다. 라이브러리 등록분만
-          선택할 수 있습니다.
+          로고·오브젝트 자산은 <b>생성되지 않고 합성</b>됩니다(라이브러리 등록분만). 보존
+          수준은 아래 합성 모드가 결정합니다 — 팩 기본/force는 원본 픽셀 100% 보존,
+          overlay는 주변 조명·그림자만 정합(코어 보존), imprint는 표면 질감이 로고를
+          관통해 색·명암이 변조됩니다(형상·hue는 상한 검증).
         </p>
         {assets.length === 0 ? (
           <p className="text-sm text-[var(--ink-soft)]">
@@ -477,6 +493,84 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
               className={field}
             />
           </div>
+        )}
+        {selectedAssets.length > 0 && (
+          <div>
+            <label className={label}>합성 모드</label>
+            <p className={help}>
+              overlay는 조명·그림자를 맞춰 얹고, imprint는 표면 질감·음영이 로고를
+              관통합니다(가죽·금속 새김). 기본은 스타일 팩의 blend 설정을 따릅니다.
+            </p>
+            <div className="mt-1.5 flex gap-2">
+              {(
+                [
+                  ["pack", "팩 기본"],
+                  ["overlay", "overlay — 조명·그림자"],
+                  ["imprint", "imprint — 표면 새김"],
+                ] as const
+              ).map(([value, text]) => (
+                <Chip key={value} active={blendMode === value} onClick={() => setBlendMode(value)}>
+                  {text}
+                </Chip>
+              ))}
+            </div>
+          </div>
+        )}
+      </Section>
+
+      <Section title="로고 참조 생성 (logoref)">
+        <p className={`${help} -mt-2`}>
+          로고를 <b>생성 단계에서 장면에 직접 각인</b>합니다 — 여러 표면·다양한 각도에
+          자연스럽게 박히는 연출 컷용. 로고 픽셀 정확성은 보증되지 않으므로, 정확성이
+          필요하면 위의 자산 삽입을 쓰세요. 자산 삽입·참조 이미지와 동시 사용은 불가합니다.
+        </p>
+        {logorefBlocked ? (
+          <p className="text-xs text-[var(--warn)]">
+            선택한 모델·백엔드는 로고 참조 생성을 지원하지 않습니다 — Qwen-Image를 선택하세요
+          </p>
+        ) : assets.length === 0 ? (
+          <p className="text-sm text-[var(--ink-soft)]">등록된 자산이 없습니다</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {assets.flatMap((asset) =>
+              asset.variants.map((variant) => {
+                const ref = `${asset.id}:${variant.id}`;
+                const active = logoRef === ref;
+                return (
+                  <button
+                    type="button"
+                    key={ref}
+                    onClick={() => setLogoRef(active ? "" : ref)}
+                    className={`flex items-center gap-2 rounded-md border p-1.5 pr-3 text-sm transition-colors ${
+                      active
+                        ? "border-[var(--mat)] bg-[var(--mat-tint)]"
+                        : "border-[var(--line)] bg-white hover:border-[var(--mat)]/50"
+                    }`}
+                  >
+                    <span className="checker-fine block h-9 w-9 overflow-hidden rounded">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={assetPreviewUrl(asset.id, variant.id)}
+                        alt=""
+                        className="h-full w-full object-contain"
+                      />
+                    </span>
+                    <span>
+                      {asset.name}
+                      <span className="ml-1 font-mono text-[10px] text-[var(--ink-soft)]">
+                        {variant.id}
+                      </span>
+                    </span>
+                  </button>
+                );
+              }),
+            )}
+          </div>
+        )}
+        {logoConflict && (
+          <p className="text-xs font-medium text-[var(--fail)]">
+            로고 참조 생성은 자산 삽입·참조 이미지와 동시에 쓸 수 없습니다 — 한쪽을 비워주세요
+          </p>
         )}
       </Section>
 
@@ -571,7 +665,7 @@ export default function BriefForm({ fromJobId }: { fromJobId?: string }) {
         </p>
       )}
       <button
-        disabled={submitting || conflict}
+        disabled={submitting || conflict || logoConflict}
         className="rounded-md bg-[var(--mat)] px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--mat-deep)] disabled:opacity-40"
       >
         {submitting ? "제출 중…" : "생성 시작"}

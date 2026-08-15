@@ -194,6 +194,7 @@ def create_app(
                     "id": p.id,
                     "label": p.label,
                     "supports_styleref": cap.supports_styleref,
+                    "supports_logoref": cap.supports_logoref,
                     "supports_inpaint": cap.supports_inpaint,
                     "supports_native_alpha": cap.supports_native_alpha,
                 }

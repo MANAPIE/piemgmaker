@@ -9,6 +9,7 @@ profiles:
     workflow_gen: object-gen-qwen-v1
     workflow_inpaint: object-inpaint-qwen-v1
     workflow_styleref: object-gen-styleref-v1
+    workflow_logoref: object-gen-logoref-v1   # 로고 내용 재현 트랙 — styleref와 같은 Edit 스택
     supports_negative: true
     sampling: { steps: 20, cfg: 2.5 }
     manifest:
@@ -33,6 +34,7 @@ profiles:
         - { replaces: qwen-image-edit-2511-Q8_0.gguf, name: qwen-image-edit-2511-Q6_K.gguf, sha256: fdc28e5b8f7d9cfe0399fd1700c375f25f000fc4159bbdb0d4a809ae898eb759 }
         - { replaces: qwen-image-layered-Q8_0.gguf, name: qwen-image-layered-Q6_K.gguf, sha256: 9008bd45e6918671ff6d1b6e8e46374c12a8339a4e26740426b0f557958e5431 }
       supports_styleref: true
+      supports_logoref: true    # styleref와 동일한 Edit unet — 추가 파일 없음
       supports_native_alpha: true
     native_alpha:
       workflow: object-gen-native-alpha-v1

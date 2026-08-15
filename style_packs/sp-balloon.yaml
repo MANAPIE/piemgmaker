@@ -17,3 +17,10 @@ matting:
   strategy: segment
   model: BiRefNet-matting
   hash: null
+blend: # 풍선은 떠 있는 느낌 — 접지보다 드롭 섀도 비중을 높게
+  strength: 0.55
+  relight: 0.5
+  contact_shadow: 0.5
+  drop_shadow: 0.45
+  light_wrap: 0.3
+  grain_match: true

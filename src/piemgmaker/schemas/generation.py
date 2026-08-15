@@ -16,10 +16,16 @@ class StylePackRef(BaseModel):
     version: str
 
 
+Corner = tuple[float, float]
+
+
 class Placement(BaseModel):
     x: int = Field(ge=0)
     y: int = Field(ge=0)
     scale: float = Field(gt=0)
+    # 기하 변환 기록 (재현용) — 구버전 payload.json 하위 호환을 위해 기본값 필수
+    rotation_deg: float = 0.0  # 양수 = 반시계 (PIL rotate 규약)
+    perspective: tuple[Corner, Corner, Corner, Corner] | None = None  # 정규화 TL·TR·BR·BL
 
 
 class ResolvedAsset(BaseModel):
@@ -54,9 +60,14 @@ class JobPayload(BaseModel):
     output_index: int = 0
     # 원격 백엔드의 모델 계열 서비스 선택 키 (로컬 실행은 None — 기존 payload.json 하위 호환)
     backend_group: str | None = None
+    # 생성 단계 로고 통합의 참조 자산 (asset-id[:variant-id]) — 재현 기록용
+    logo_reference: str | None = None
 
     @computed_field
     @property
     def protected_asset(self) -> bool:
-        """자산 포함 잡 — HostedAPI 라우팅 금지 판정에 쓰인다."""
-        return bool(self.assets)
+        """브랜드 자산 포함 잡 — HostedAPI 라우팅 금지 판정에 쓰인다.
+
+        합성 자산뿐 아니라 로고 참조(생성 트랙)도 브랜드 자산이 업로드되므로 보호 대상이다.
+        """
+        return bool(self.assets) or bool(self.logo_reference)

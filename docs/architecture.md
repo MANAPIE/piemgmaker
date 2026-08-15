@@ -6,11 +6,11 @@ PIEmgmaker는 배너에 삽입할 그래픽 오브젝트를 알파 배경 PNG로
 
 3원칙:
 
-1. 브랜드 자산은 생성하지 않고 합성한다 (로고 변형 포함, 자산 라이브러리에서 삽입만).
+1. 브랜드 자산은 생성하지 않고 합성한다 (로고 변형 포함, 자산 라이브러리에서 삽입만). **명시적 예외 — logoref 트랙**: `brief.logo_reference`는 로고를 Edit 계열 참조 '내용'으로 재현하는 생성 트랙으로, 여러 표면에 로고가 박힌 연출 장면 전용이다. 픽셀·코어 보증이 없으므로 정확성이 필요한 배너 소재는 합성 경로(assets)를 쓴다.
 2. 배경 제거는 파이프라인의 책임이다.
 3. 알파는 이진 마스크가 아니라 연속값(soft alpha)이다 — 유리·반투명 재질을 지원한다.
 
-시스템은 결정론 구간과 생성 구간으로 나뉜다. 결정론 구간(스키마 검증·후처리·paste-back·코어 해시 검증·QA·지표)은 동일 입력에 동일 출력을 보장하고 단위 테스트로 검증한다. 생성 구간(ComfyUI 실행)은 골든 세트로 검증한다. 단위 테스트는 ComfyUI HTTP를 전부 모킹한다.
+시스템은 결정론 구간과 생성 구간으로 나뉜다. 결정론 구간(스키마 검증·후처리·하모나이즈·paste-back·코어 검증·QA·지표)은 동일 입력에 동일 출력을 보장하고 단위 테스트로 검증한다. 하모나이즈의 그레인 난수도 명시 시드(후보 시드 ⊕ asset_id 해시)라 결정론이다. 생성 구간(ComfyUI 실행)은 골든 세트로 검증한다. 단위 테스트는 ComfyUI HTTP를 전부 모킹한다.
 
 ## 2. 리포·패키지 구성
 
@@ -97,12 +97,21 @@ BriefInput(yaml/json) ─ validate ─→ 스타일 팩·자산 resolve ─→ G
    │     opaque:      단색 배경 강제 txt2img + segment
    │     translucent: native_alpha (폴백 trimap)
    ├─ 자산 있음        → object-inpaint
-   │     자산 선배치 → 2단 마스크(코어 + 전이 밴드) 인페인팅 → 위 전략 동일
-   └─ reference_images → object-gen-styleref (Qwen-Image-Edit-2511)
-         프롬프트에 "in the style of the reference image" 자동 부가, 배경 제거는 opaque segment
+   │     자산 기하 변환(팩 blend.geometry: 회전·틸트) → 선배치
+   │     → 마스크(코어 core_noise / 전이 밴드 램프 / 외부 255) 인페인팅 → 위 전략 동일
+   │       (blend 팩은 통합 유도 프롬프트 부가; core_noise 0이면 코어 완전 보호 2단 마스크)
+   ├─ reference_images → object-gen-styleref (Qwen-Image-Edit-2511)
+   │     프롬프트에 "in the style of the reference image" 자동 부가, 배경 제거는 opaque segment
+   └─ logo_reference   → object-gen-logoref (같은 Edit 스택, 원칙 1의 명시적 예외)
+         라이브러리 로고를 흰 배경 RGB로 변환해 참조 입력, "로고 충실 재현" 프롬프트 부가.
+         자산 합성·스타일 참조와 동시 사용 불가(v1), 코어·fidelity 검증 없음(생성 트랙)
    ▼ engine.submit / poll / fetch   (후보 k장, 카드별 시드 기록)
    ▼ postprocess (결정론)
-   ▼ [자산 경로] paste_back → verify_core_hash (불일치 → 재시도 1회 → 실패)
+   ▼ [자산 경로] 합성·검증 — 팩의 blend 블록 유무로 갈린다
+        blend 없음: paste_back(force) → verify_core_hash (sha256 100%, 불일치 → 파생 시드 재시도 1회)
+        blend 있음: harmonize(조명장→그림자→리라이트→라이트랩→그레인) → paste_back(blend)
+                    → measure_asset_fidelity (형상 IoU·색차 ΔE·hue 상한,
+                       초과 시 그 후보만 force 강등 — GPU 재시도 없음)
    ▼ run_qa (하드 룰, material 인지)
 ```
 
@@ -133,9 +142,26 @@ BriefInput(yaml/json) ─ validate ─→ 스타일 팩·자산 resolve ─→ G
 def postprocess(rgba: Image, spec: PostprocessSpec) -> Image
     # 디프린지 → bbox 크롭 → 여백 정규화. 동일 입력 → 동일 출력.
 
-def paste_back(gen: Image, asset: AssetVariant, placement: Placement) -> Image
-def verify_core_hash(result: Image, asset: AssetVariant, placement: Placement) -> bool
-    # 코어 영역 픽셀 buffer의 sha256 정확 일치 (지각 해시 아님). 불일치 → 재시도 1회 → 실패.
+def transform_asset(asset: Image, scale, rotation_deg, tilt) -> (rgba, quad)
+    # 회전 → 원근(틸트 프리셋) → 스케일. 스케일이 마지막이라 캔버스 맞춤이 정확하다.
+    # 사용한 정규화 사변형은 Placement.perspective로 기록된다 (재현용).
+
+def harmonize(scene: Image, asset: rgba, placement, spec: HarmonizeSpec) -> (scene, asset, report)
+    # mode="overlay": ① 링 표본 조명장(normalized convolution) ② 접지·드롭 그림자
+    #   ③ 리라이트(선형 RGB 곱셈 — hue·채도 보존, 휘도 변조 상한 클램프)
+    #   ④ 라이트랩 + 엣지 페더(확장만 — 형상 침식 없음) ⑤ 그레인·선예도 정합(명시 시드).
+    # mode="imprint": 표면 '새김' — 장면 휘도(질감+음영)를 로고에 선형 곱셈으로 관통시키고
+    #   알파 경계 기울기 × 광원 방향으로 데보스 음영을 만든다. 그림자·그레인·알파 확장은
+    #   없다(새김은 표면의 일부다). 색차가 설계상 커서 imprint 팩은 fidelity 상한을 올린다.
+    # scene과 asset을 각각 변형만 하고 합성하지 않는다 — 합성은 paste_back 소유.
+
+def paste_back(gen: Image, asset: rgba, placement, *, core_policy="force") -> Image
+def verify_core_hash(result: Image, asset: rgba, placement: Placement) -> bool
+    # force: 코어 강제 복사 + sha256 정확 일치 (지각 해시 아님). 불일치 → 재시도 1회 → 실패.
+
+def measure_asset_fidelity(result, pasted, original, placement, spec) -> FidelityReport
+    # blend: 형상 IoU(하모나이즈 자산 vs 원본) + 코어 CIE76 색차 + hue 변조 상한.
+    # 상한 초과 시 오케스트레이터가 그 후보만 force로 재합성한다 (그림자는 유지, 비용 0).
 
 def run_qa(rgba: Image, material: MaterialClass) -> QAReport
     # 경계 접촉 검사 / 알파 커버리지 하한·상한 / 헤일로 검사(material 인지로 soft alpha 오탐 방지)
@@ -147,7 +173,7 @@ def run_qa(rgba: Image, material: MaterialClass) -> QAReport
 
 - `default`: qwen-image.
 - 프로파일 2종:
-  - **qwen-image** — workflow_gen `object-gen-qwen-v1`, workflow_inpaint `object-inpaint-qwen-v1`, workflow_styleref `object-gen-styleref-v1`, supports_negative `true`.
+  - **qwen-image** — workflow_gen `object-gen-qwen-v1`, workflow_inpaint `object-inpaint-qwen-v1`, workflow_styleref `object-gen-styleref-v1`, workflow_logoref `object-gen-logoref-v1`(styleref와 같은 Edit 스택·매니페스트 공유), supports_negative `true`.
   - **flux2-dev** — workflow_gen `object-gen-flux2-v1`, workflow_inpaint `object-inpaint-flux2-v1`, styleref 미지원(참조 이미지는 qwen-image), supports_negative `false`.
 - qwen-image에는 native_alpha 서브프로파일(workflow `object-gen-native-alpha-v1`, Qwen-Image-Layered + 전용 VAE)이 있다.
 - 각 프로파일 manifest는 unet/clip/vae 파일을 sha256로 핀한다. qwen 계열 3워크플로우는 clip을 공유하고, flux2-dev의 텍스트 인코더는 fp8을 쓴다.
@@ -156,6 +182,7 @@ def run_qa(rgba: Image, material: MaterialClass) -> QAReport
 ## 9. 스타일 팩 & 자산 라이브러리
 
 - **스타일 팩**: `style_packs/`에 12종 YAML(기본 제공 — 교체·커스터마이즈 가능). 팩은 스타일만 소유하고 모델 가중치는 소유하지 않는다.
+- **blend 블록** (선택): 자산 하모나이즈 강도를 팩이 소유한다 — `mode`(overlay=조명·그림자 정합 / imprint=표면 새김·질감 투과), `strength`(마스터)·`relight`·`contact_shadow`·`drop_shadow`·`light_wrap`·`grain_match`, imprint 전용(`imprint_texture`·`imprint_emboss`·`ink_opacity`), 기하(`geometry.rotation_deg`·`tilt`), 인페인트 마스크(`generative.core_noise`·`band_px`·`ramp`), 편차 상한(`fidelity`). 브리프의 `asset_blend_mode`가 모드만 잡 단위로 오버라이드할 수 있다(웹 폼 노출) — imprint 오버라이드 시 ΔE 상한을 새김 기준(≥30)으로 자동 보정한다. 블록이 없으면 force 합성(코어 sha256 100% 보존)이다. 그림자 두 성분은 `shadow_policy`로 배율된다(none은 0). `generative.core_noise`는 기본 0(코어 완전 보호)이며, 열 때는 골든 세트로 회귀를 감시한다 — 마스크 중간값의 부분 디노이즈 동작은 ComfyUI 버전에 따라 다를 수 있어 실측 후 조정한다.
 - **자산 라이브러리**: 파일 기반이다. `assets/manifest.yaml` + `assets/<asset-id>/<variant-id>.png` 구조이며, 매 요청 로드라 등록 즉시 반영된다.
 - **등록 검증**: RGBA + 알파 채널 존재, 완전 불투명 코어 존재(코어 해시 검증 전제), id kebab 규칙·중복 검사, 파일 크기 상한. PNG만 지원한다.
 - **저장**: 원자적 재작성(tmp → rename)으로 이루어지며, 서버 내 `threading.Lock`으로 워커의 빌드 로드와 경합을 막는다. 삭제는 숨김(soft delete)이다.

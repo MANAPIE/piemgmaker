@@ -17,3 +17,10 @@ matting:
   strategy: segment
   model: BiRefNet-matting
   hash: null
+blend: # 반사 금속 — 주변광 반영(리라이트·라이트랩)을 가장 강하게
+  strength: 0.65
+  relight: 0.75
+  contact_shadow: 0.6
+  drop_shadow: 0.4
+  light_wrap: 0.45
+  grain_match: true
