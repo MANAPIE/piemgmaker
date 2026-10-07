@@ -20,7 +20,7 @@ from piemgmaker.engine.contract import EngineError
 log = logging.getLogger(__name__)
 
 ENV_ONDEMAND_DIR = "PM_COMFY_ONDEMAND_DIR"
-DEFAULT_ONDEMAND_DIR = Path.home() / "comfy-ondemand"
+DEFAULT_ONDEMAND_DIR = Path.home() / "AI" / "comfy-ondemand"
 
 
 class LocalComfyEngine(ComfyHTTPEngine):
